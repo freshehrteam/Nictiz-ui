@@ -29,6 +29,11 @@ Secret.
 
 ## Install
 
+Installed from this repo, not from a chart registry. CI validates the chart on
+every change (`.github/workflows/helm-lint.yml`) but publishes nothing — a
+packaged copy in a registry would be a second artifact that nothing installs
+from, and that can silently disagree with the working tree.
+
 ```bash
 htpasswd -nbB <user> '<password>' > auth
 kubectl create secret generic nictiz-ui-basic-auth -n health-stack --from-file=auth
