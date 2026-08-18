@@ -1,0 +1,96 @@
+# Lint + render-check the nictiz-ui chart on every change; package & push it as
+# an OCI artifact to GHCR on v* tags.
+#
+#   Install (consumers):
+#     helm install nictiz-ui \
+#       oci://ghcr.io/<org>/charts/nictiz-ui --version <x.y.z> \
+#       -n health-stack -f values-hetzner.yaml
+#
+# The chart version published equals the git tag (minus the leading 'v'), so
+# v0.2.0 → chart 0.2.0. Mirrors the health-stack repo's helm-publish.yml.
+name: helm-publish
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "charts/nictiz-ui/**"
+      - ".github/workflows/helm-publish.yml"
+  pull_request:
+    paths:
+      - "charts/nictiz-ui/**"
+      - ".github/workflows/helm-publish.yml"
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  CHART_DIR: charts/nictiz-ui
+
+jobs:
+  # Render every values file. Catches template regressions that `helm lint`
+  # alone misses — lint checks the chart, template checks that each environment's
+  # values actually produce valid manifests.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+
+      - name: Lint
+        run: |
+          helm lint ${{ env.CHART_DIR }}
+          helm lint ${{ env.CHART_DIR }} -f ${{ env.CHART_DIR }}/values-hetzner.yaml
+
+      - name: Render (default values)
+        run: helm template nictiz-ui ${{ env.CHART_DIR }} -n health-stack > /dev/null
+
+      - name: Render (hetzner values)
+        run: |
+          helm template nictiz-ui ${{ env.CHART_DIR }} -n health-stack \
+            -f ${{ env.CHART_DIR }}/values-hetzner.yaml > /dev/null
+
+      # The htpasswd guard rails are the chart's only real logic, and both are
+      # fail-safe checks — assert they still FAIL, so a refactor cannot quietly
+      # turn "reject a plaintext password" into "accept it".
+      - name: Guard rails still reject bad basic-auth input
+        run: |
+          if helm template t ${{ env.CHART_DIR }} \
+               --set auth.basicAuth.create=true >/dev/null 2>&1; then
+            echo "::error::create=true with no htpasswd should have failed"; exit 1
+          fi
+          if helm template t ${{ env.CHART_DIR }} \
+               --set auth.basicAuth.create=true \
+               --set auth.basicAuth.htpasswd=plaintext >/dev/null 2>&1; then
+            echo "::error::create=true with a plaintext password should have failed"; exit 1
+          fi
+          echo "Both guard rails rejected bad input, as intended."
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login ${{ env.REGISTRY }} \
+                -u ${{ github.actor }} --password-stdin
+
+      - name: Package & push
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Override from the tag rather than trusting Chart.yaml to be in sync.
+          helm package ${{ env.CHART_DIR }} --version "$VERSION" --app-version "$VERSION"
+          helm push "nictiz-ui-$VERSION.tgz" \
+            "oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts"

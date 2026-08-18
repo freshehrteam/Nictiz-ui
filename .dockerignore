@@ -1,0 +1,29 @@
+# Build context is the repo root; keep it small and keep secrets out.
+
+# Never ship credentials into a layer — .env holds the EHRbase password.
+.env
+.env.*
+!.env.example
+
+**/node_modules
+**/dist
+**/test-results
+**/playwright-report
+**/.vite
+
+.git
+.github
+.idea
+.nimbalyst
+nimbalyst-local
+
+# Tests and their fixtures are not part of the runtime image. NOTE: this is
+# app/tests only — the top-level fixtures/ directory IS shipped (served by
+# /api/golden), so it must not be excluded here.
+app/tests
+app/playwright.config.ts
+app/vitest.config.ts
+
+tools
+docs
+*.md

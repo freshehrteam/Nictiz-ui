@@ -1,0 +1,56 @@
+{{- if .Values.ingress.enabled }}
+{{/*
+The UI's own Ingress, on its OWN host.
+
+Separate from the health-stack Ingress on purpose. That one publishes /fhir,
+/ehrbase and /openfhir — raw, unauthenticated back-end APIs. This host serves
+the EMR and is gated by basic-auth. Sharing a host would mean either leaving the
+back-end paths ungated on an authenticated host, or gating them and breaking
+the openFHIR interceptor's server-to-server calls.
+
+`/` catches everything: the SPA, its assets, and /api. That is the whole point
+of serving them from one process — one origin, one auth boundary, no CORS.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "nictiz-ui.fullname" . }}
+  labels:
+    {{- include "nictiz-ui.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- if .Values.auth.basicAuth.enabled }}
+    # ── The access control ────────────────────────────────────────────────
+    # nginx verifies credentials against the htpasswd Secret before proxying,
+    # so an unauthenticated request never reaches the BFF — which is what makes
+    # it safe for the BFF to hold a single shared EHRbase credential.
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: {{ include "nictiz-ui.basicAuthSecretName" . | quote }}
+    nginx.ingress.kubernetes.io/auth-realm: {{ .Values.auth.basicAuth.realm | quote }}
+    {{- end }}
+    {{- if .Values.ingress.tls.enabled }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer | quote }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "nictiz-ui.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}

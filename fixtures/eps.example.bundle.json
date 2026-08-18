@@ -1,0 +1,483 @@
+{
+    "resourceType": "Bundle",
+    "meta": {
+        "profile": [
+            "http://hl7.org/fhir/uv/ips/StructureDefinition/Bundle-uv-ips"
+        ]
+    },
+    "identifier": {
+        "system": "urn:oid:2.16.840.1.113883.3.72",
+        "value": "a7ee00e0-f3ba-4289-9a66-faf57321f1c2"
+    },
+    "type": "document",
+    "timestamp": "2026-08-18T08:36:30.505+00:00",
+    "entry": [
+        {
+            "resource": {
+                "resourceType": "Composition",
+                "meta": {
+                    "profile": [
+                        "http://hl7.org/fhir/uv/ips/StructureDefinition/Composition-uv-ips"
+                    ]
+                },
+                "status": "final",
+                "type": {
+                    "coding": [
+                        {
+                            "system": "http://loinc.org",
+                            "code": "60591-5",
+                            "display": "Patient summary Document"
+                        }
+                    ]
+                },
+                "date": "2026-08-18T08:36:30+00:00",
+                "author": [
+                    {
+                        "display": "openFHIR"
+                    }
+                ],
+                "title": "Patient Summary",
+                "section": [
+                    {
+                        "title": "Allergies and Intolerances",
+                        "code": {
+                            "coding": [
+                                {
+                                    "system": "http://loinc.org",
+                                    "code": "48765-2",
+                                    "display": "Allergies and adverse reactions Document"
+                                }
+                            ]
+                        },
+                        "text": {
+                            "status": "generated",
+                            "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\"><h5>Allergies and Intolerances</h5><table class=\"hapiPropertyTable\"><thead><tr><th>Substance</th><th>Clinical Status</th><th>Verification Status</th><th>Type</th><th>Category</th><th>Criticality</th><th>Reactions</th><th>Notes</th></tr></thead><tbody><tr>  <!-- Substance (code): prefer text, fall back to first coding display --><td><span>Caries prophylactic agents</span></td>  <!-- Clinical status --><td><span>active</span><br/></td>  <!-- Verification status --><td><span>unconfirmed</span><br/></td>  <!-- Type (allergy | intolerance) --><td></td>  <!-- Category (food | medication | environment | biologic) --><td><span>food</span><br/></td>  <!-- Criticality --><td></td>  <!-- Reactions: substance + manifestations + severity --><td><span>Penicillin V</span>: <span>Bronchospasm</span><br/></td>  <!-- Notes --><td><span>a comment</span><br/></td></tr></tbody></table></div>"
+                        },
+                        "entry": [
+                            {
+                                "reference": "urn:uuid:8bf6c004-b1ac-4d38-b384-93eb62230a69"
+                            }
+                        ],
+                        "emptyReason": {
+                            "coding": [
+                                {
+                                    "system": "http://terminology.hl7.org/CodeSystem/list-empty-reason",
+                                    "code": "nilknown",
+                                    "display": "No known allergies"
+                                }
+                            ],
+                            "text": "No known allergies"
+                        }
+                    },
+                    {
+                        "title": "Problems",
+                        "code": {
+                            "coding": [
+                                {
+                                    "system": "http://loinc.org",
+                                    "code": "11450-4",
+                                    "display": "Problem list Reported"
+                                }
+                            ]
+                        },
+                        "text": {
+                            "status": "generated",
+                            "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\"><h5>Problem List</h5><table class=\"hapiPropertyTable\"><thead><tr><th>Condition</th><th>Clinical Status</th><th>Verification Status</th><th>Severity</th><th>Onset</th><th>Abatement</th><th>Notes</th></tr></thead><tbody><tr>  <!-- Condition code: prefer text, fall back to first coding display --><td><span>Clinical finding (finding)</span></td>  <!-- Clinical status: first coding code --><td><span>active</span><br/><span>resolved</span><br/><span>remission</span><br/><span>recurrence</span><br/></td>  <!-- Verification status: first coding code --><td><span>unconfirmed</span><br/></td>  <!-- Severity: first coding display --><td><span>Mild</span><br/></td>  <!-- Onset --><td><span>2022-02-03T04:05:06+00:00</span></td>  <!-- Abatement --><td><span>2022-02-03T04:05:06+00:00</span></td>  <!-- Notes --><td><span>Lorem ipsum</span><br/></td></tr></tbody></table></div>"
+                        },
+                        "entry": [
+                            {
+                                "reference": "urn:uuid:de79078a-5823-4d53-a755-7a0a23b0f09f"
+                            }
+                        ],
+                        "emptyReason": {
+                            "coding": [
+                                {
+                                    "system": "http://terminology.hl7.org/CodeSystem/list-empty-reason",
+                                    "code": "nilknown",
+                                    "display": "No known problems"
+                                }
+                            ],
+                            "text": "No known problems"
+                        }
+                    },
+                    {
+                        "title": "Medical Devices and Implants",
+                        "code": {
+                            "coding": [
+                                {
+                                    "system": "http://loinc.org",
+                                    "code": "46264-8",
+                                    "display": "History of medical device use"
+                                }
+                            ]
+                        },
+                        "text": {
+                            "status": "generated",
+                            "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\"><h5>Medical Devices</h5><table class=\"hapiPropertyTable\"><thead><tr><th>Device</th><th>Status</th><th>Body Site</th><th>Timing</th><th>Notes</th></tr></thead><tbody><tr>  <!-- Device: resolve reference and prefer deviceName, fall back to type codings --><td><span>Ceramic hip implant</span></td>  <!-- Status --><td></td>  <!-- Body site --><td><span>Left hip</span></td>  <!-- Timing --><td><span></span></td>  <!-- Notes --><td></td></tr></tbody></table></div>"
+                        },
+                        "entry": [
+                            {
+                                "reference": "urn:uuid:735be406-7743-4296-b7da-bee64cf7d553"
+                            }
+                        ],
+                        "emptyReason": {
+                            "coding": [
+                                {
+                                    "system": "http://terminology.hl7.org/CodeSystem/list-empty-reason",
+                                    "code": "unavailable",
+                                    "display": "Lorem ipsum"
+                                }
+                            ],
+                            "text": "No information about medical devices"
+                        }
+                    },
+                    {
+                        "title": "Procedures",
+                        "code": {
+                            "coding": [
+                                {
+                                    "system": "http://loinc.org",
+                                    "code": "47519-4",
+                                    "display": "History of Procedures Document"
+                                }
+                            ]
+                        },
+                        "text": {
+                            "status": "generated",
+                            "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\"><h5>Procedures</h5><table class=\"hapiPropertyTable\"><thead><tr><th>Procedure</th><th>Status</th><th>Body Site</th><th>Performed</th><th>Outcome</th><th>Notes</th></tr></thead><tbody><tr>  <!-- Procedure code: prefer text, fall back to first coding display --><td><span>Appendectomy</span></td>  <!-- Status --><td></td>  <!-- Body site --><td><span>McBurney point area</span></td>  <!-- Performed --><td><span>2021-06-15T08:30:00+00:00</span></td>  <!-- Outcome: prefer text, fall back to codings --><td><span>Procedure successful</span></td>  <!-- Notes --><td><span>Patient tolerated procedure well</span><br/></td></tr></tbody></table></div>"
+                        },
+                        "entry": [
+                            {
+                                "reference": "urn:uuid:1d4d0554-f13e-4b3a-a066-1000dae2160b"
+                            }
+                        ],
+                        "emptyReason": {
+                            "coding": [
+                                {
+                                    "system": "http://terminology.hl7.org/CodeSystem/list-empty-reason",
+                                    "code": "nilknown",
+                                    "display": "No known procedures"
+                                }
+                            ],
+                            "text": "No known procedures"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "fullUrl": "urn:uuid:8bf6c004-b1ac-4d38-b384-93eb62230a69",
+            "resource": {
+                "resourceType": "AllergyIntolerance",
+                "clinicalStatus": {
+                    "coding": [
+                        {
+                            "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+                            "code": "active",
+                            "display": "Active"
+                        }
+                    ],
+                    "text": "Active"
+                },
+                "verificationStatus": {
+                    "coding": [
+                        {
+                            "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                            "code": "unconfirmed",
+                            "display": "Unconfirmed"
+                        }
+                    ],
+                    "text": "Unconfirmed"
+                },
+                "type": "allergy",
+                "category": [
+                    "food"
+                ],
+                "criticality": "low",
+                "code": {
+                    "coding": [
+                        {
+                            "system": "https://termgit.elga.gv.at/CodeSystem/atc-deutsch-wido",
+                            "code": "A01AA",
+                            "display": "Caries prophylactic agents"
+                        }
+                    ],
+                    "text": "Caries prophylactic agents"
+                },
+                "onsetDateTime": "2022-02-03T04:05:06+00:00",
+                "lastOccurrence": "2022-02-03T04:05:06+00:00",
+                "note": [
+                    {
+                        "text": "a comment"
+                    }
+                ],
+                "reaction": [
+                    {
+                        "substance": {
+                            "text": "Penicillin V"
+                        },
+                        "manifestation": [
+                            {
+                                "coding": [
+                                    {
+                                        "system": "http://www.snomed.org",
+                                        "code": "4386001",
+                                        "display": "Bronchospasm"
+                                    }
+                                ],
+                                "text": "Bronchospasm"
+                            }
+                        ],
+                        "description": "Generalised urticaria within 30 minutes",
+                        "onset": "2022-02-03T04:05:06+00:00",
+                        "severity": "mild",
+                        "exposureRoute": {
+                            "text": "Oral"
+                        },
+                        "note": [
+                            {
+                                "text": "Reaction occurred after first dose"
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "fullUrl": "urn:uuid:de79078a-5823-4d53-a755-7a0a23b0f09f",
+            "resource": {
+                "resourceType": "Condition",
+                "clinicalStatus": {
+                    "coding": [
+                        {
+                            "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                            "code": "active",
+                            "display": "Active"
+                        },
+                        {
+                            "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                            "code": "resolved",
+                            "display": "Resolved"
+                        },
+                        {
+                            "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                            "code": "remission",
+                            "display": "Remission"
+                        },
+                        {
+                            "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                            "code": "recurrence",
+                            "display": "Recurrence"
+                        }
+                    ]
+                },
+                "verificationStatus": {
+                    "coding": [
+                        {
+                            "system": "http://terminology.hl7.org/CodeSystem/condition-ver-status",
+                            "code": "unconfirmed",
+                            "display": "Unconfirmed"
+                        }
+                    ]
+                },
+                "severity": {
+                    "coding": [
+                        {
+                            "system": "http://terminology.hl7.org/CodeSystem/condition-severity",
+                            "code": "mild",
+                            "display": "Mild"
+                        }
+                    ]
+                },
+                "code": {
+                    "coding": [
+                        {
+                            "system": "http://www.snomed.org",
+                            "code": "404684003",
+                            "display": "Clinical finding (finding)"
+                        }
+                    ],
+                    "text": "Clinical finding (finding)"
+                },
+                "bodySite": [
+                    {
+                        "coding": [
+                            {
+                                "system": "http://www.snomed.org",
+                                "code": "53075003",
+                                "display": "Distal phalanx of hallux"
+                            }
+                        ],
+                        "text": "Distal phalanx of hallux"
+                    }
+                ],
+                "onsetDateTime": "2022-02-03T04:05:06+00:00",
+                "abatementDateTime": "2022-02-03T04:05:06+00:00",
+                "stage": [
+                    {
+                        "summary": {
+                            "text": "stage result other"
+                        },
+                        "type": {
+                            "text": "stage evidence"
+                        }
+                    }
+                ],
+                "evidence": [
+                    {
+                        "code": [
+                            {
+                                "text": "clinical evidence result other"
+                            }
+                        ]
+                    }
+                ],
+                "note": [
+                    {
+                        "text": "Lorem ipsum"
+                    }
+                ]
+            }
+        },
+        {
+            "fullUrl": "urn:uuid:735be406-7743-4296-b7da-bee64cf7d553",
+            "resource": {
+                "resourceType": "DeviceUseStatement",
+                "status": "active",
+                "timingPeriod": {
+                    "start": "2019-03-10T09:00:00+00:00",
+                    "end": "2023-02-03T04:05:06+00:00"
+                },
+                "device": {
+                    "reference": "urn:uuid:d27d41ed-00f3-4978-96d3-956e667fb2fb"
+                },
+                "bodySite": {
+                    "text": "Left hip"
+                }
+            }
+        },
+        {
+            "fullUrl": "urn:uuid:d27d41ed-00f3-4978-96d3-956e667fb2fb",
+            "resource": {
+                "resourceType": "Device",
+                "identifier": [
+                    {
+                        "value": "HIP-OTHER-002"
+                    }
+                ],
+                "udiCarrier": [
+                    {
+                        "deviceIdentifier": "UDI-HIP-0987654321"
+                    }
+                ],
+                "distinctIdentifier": "DISTINCT",
+                "manufacturer": "Zimmer Biomet",
+                "manufactureDate": "2025-02-03T04:05:06+00:00",
+                "expirationDate": "2022-02-03T04:05:06+00:00",
+                "lotNumber": "LOT-HIP-2018",
+                "serialNumber": "HIP-SN-987654",
+                "deviceName": [
+                    {
+                        "name": "Ceramic hip implant"
+                    }
+                ],
+                "modelNumber": "Continuum-AC",
+                "type": {
+                    "text": "Orthopaedic implant"
+                },
+                "version": [
+                    {
+                        "value": "N/A"
+                    }
+                ],
+                "note": [
+                    {
+                        "text": "Implant functioning well"
+                    }
+                ]
+            }
+        },
+        {
+            "fullUrl": "urn:uuid:1d4d0554-f13e-4b3a-a066-1000dae2160b",
+            "resource": {
+                "resourceType": "Procedure",
+                "status": "stopped",
+                "statusReason": {
+                    "text": "Lorem ipsum"
+                },
+                "category": {
+                    "text": "Lorem ipsum"
+                },
+                "code": {
+                    "text": "Appendectomy"
+                },
+                "performedDateTime": "2021-06-15T08:30:00+00:00",
+                "reasonCode": [
+                    {
+                        "text": "Acute appendicitis"
+                    }
+                ],
+                "bodySite": [
+                    {
+                        "text": "McBurney point area"
+                    }
+                ],
+                "outcome": {
+                    "text": "Procedure successful"
+                },
+                "complication": [
+                    {
+                        "text": "Minor bleeding"
+                    }
+                ],
+                "note": [
+                    {
+                        "text": "Patient tolerated procedure well"
+                    }
+                ],
+                "focalDevice": [
+                    {
+                        "manipulated": {
+                            "reference": "urn:uuid:f1710e9d-4560-45a7-8c44-49f3abcd2ab1"
+                        }
+                    }
+                ],
+                "usedReference": [
+                    {
+                        "reference": "urn:uuid:728d36e6-df2c-4cac-9387-16bfb9f60d1c"
+                    }
+                ],
+                "usedCode": [
+                    {
+                        "text": "use code device type"
+                    }
+                ]
+            }
+        },
+        {
+            "fullUrl": "urn:uuid:f1710e9d-4560-45a7-8c44-49f3abcd2ab1",
+            "resource": {
+                "resourceType": "Device",
+                "deviceName": [
+                    {
+                        "name": "focal device name"
+                    }
+                ]
+            }
+        },
+        {
+            "fullUrl": "urn:uuid:728d36e6-df2c-4cac-9387-16bfb9f60d1c",
+            "resource": {
+                "resourceType": "Device",
+                "deviceName": [
+                    {
+                        "name": "used device name"
+                    }
+                ],
+                "type": {
+                    "text": "use code device type"
+                }
+            }
+        }
+    ]
+}

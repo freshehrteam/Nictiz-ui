@@ -1,0 +1,503 @@
+/**
+ * Design tokens and the application chrome.
+ *
+ * ALL component CSS lives in global stylesheets, scoped under the component's
+ * tag name. This is not a preference — every component renders into LIGHT DOM
+ * (`createRenderRoot() { return this }`) because `mb-form`'s slot traversal
+ * cannot see its children through a Lit 3 shadow root. Lit only applies
+ * `static styles` inside a shadow root, so any styles declared there would be
+ * silently dropped. That bug shipped once in the PoC; this is the fix.
+ */
+
+:root {
+  /* Dark teal — the sidebar and primary accent. */
+  --eps-teal-900: #0b3b3c;
+  --eps-teal-800: #0f4c4e;
+  --eps-teal-700: #146063;
+  --eps-teal-600: #1a7a7e;
+  --eps-teal-500: #22999e;
+  --eps-teal-100: #d8eeef;
+  --eps-teal-50: #eef8f8;
+
+  --eps-bg: #f4f6f7;
+  --eps-surface: #ffffff;
+  --eps-border: #dfe4e6;
+  --eps-border-strong: #c3cccf;
+
+  --eps-text: #16242a;
+  --eps-text-muted: #5d7078;
+  --eps-text-inverse: #eaf5f5;
+
+  --eps-danger: #b3261e;
+  --eps-danger-bg: #fdecea;
+  --eps-success: #1b6b3a;
+  --eps-success-bg: #e6f4ea;
+  --eps-warning: #8a5a00;
+  --eps-warning-bg: #fdf3e0;
+
+  --eps-radius: 10px;
+  --eps-radius-sm: 6px;
+  --eps-shadow: 0 1px 2px rgb(22 36 42 / 8%), 0 4px 12px rgb(22 36 42 / 6%);
+
+  --eps-sidebar-width: 232px;
+  --eps-footer-height: 68px;
+
+  --eps-font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --eps-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+
+  /* Shoelace tokens the mb-* components read. Overriding them here is what
+     keeps Medblocks' inputs visually consistent with our own controls. */
+  --sl-color-primary-600: var(--eps-teal-600);
+  --sl-color-primary-500: var(--eps-teal-500);
+  --sl-input-border-radius-medium: var(--eps-radius-sm);
+  --sl-font-sans: var(--eps-font);
+
+  /* Density. Shoelace's defaults are sized for a marketing page, not a clinical
+     form of several hundred fields; these three tokens are most of why a
+     section now fits in roughly half the vertical space. */
+  --sl-input-height-medium: 34px;
+  --sl-input-font-size-medium: 13px;
+  --sl-input-label-font-size-medium: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: var(--eps-font);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--eps-text);
+  background: var(--eps-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  height: 100%;
+}
+
+/* --- application shell ---------------------------------------------------- */
+
+eps-app {
+  display: grid;
+  grid-template-columns: var(--eps-sidebar-width) 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* --- sidebar -------------------------------------------------------------- */
+
+eps-app .sidebar {
+  display: flex;
+  flex-direction: column;
+  background: var(--eps-teal-900);
+  color: var(--eps-text-inverse);
+  overflow-y: auto;
+}
+
+eps-app .brand {
+  padding: 20px 18px 16px;
+  border-bottom: 1px solid rgb(255 255 255 / 10%);
+}
+
+eps-app .brand h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+eps-app .brand p {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: rgb(234 245 245 / 62%);
+}
+
+eps-app nav {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 10px;
+  gap: 2px;
+}
+
+eps-app nav button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: var(--eps-radius-sm);
+  background: transparent;
+  color: rgb(234 245 245 / 78%);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+eps-app nav button:hover {
+  background: rgb(255 255 255 / 8%);
+  color: var(--eps-text-inverse);
+}
+
+eps-app nav button[aria-current='page'] {
+  background: var(--eps-teal-600);
+  color: #fff;
+  font-weight: 600;
+}
+
+eps-app nav .nav-icon {
+  width: 16px;
+  text-align: center;
+  opacity: 0.9;
+}
+
+/* Patient currently in context, pinned under the nav. */
+eps-app .sidebar-patient {
+  margin: 8px 10px;
+  padding: 10px 12px;
+  border-radius: var(--eps-radius-sm);
+  background: rgb(255 255 255 / 7%);
+  font-size: 12px;
+}
+
+eps-app .sidebar-patient .label {
+  color: rgb(234 245 245 / 55%);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+eps-app .sidebar-patient .name {
+  font-weight: 600;
+  color: #fff;
+}
+
+eps-app .sidebar-foot {
+  margin-top: auto;
+  padding: 14px 18px;
+  font-size: 11px;
+  color: rgb(234 245 245 / 45%);
+  border-top: 1px solid rgb(255 255 255 / 10%);
+}
+
+eps-app .conn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+
+eps-app .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #7f8f93;
+  flex: none;
+}
+
+eps-app .dot.up {
+  background: #4ade80;
+}
+
+eps-app .dot.down {
+  background: #f87171;
+}
+
+/* --- main region ---------------------------------------------------------- */
+
+eps-app .main {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+eps-app .view {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 28px 32px;
+}
+
+/* --- shared view furniture ------------------------------------------------ */
+
+.view-head {
+  margin-bottom: 20px;
+}
+
+.view-head h2 {
+  margin: 0 0 3px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.view-head p {
+  margin: 0;
+  color: var(--eps-text-muted);
+  font-size: 13px;
+}
+
+.card {
+  background: var(--eps-surface);
+  border: 1px solid var(--eps-border);
+  border-radius: var(--eps-radius);
+  box-shadow: var(--eps-shadow);
+}
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--eps-border);
+}
+
+.card-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.card-body {
+  padding: 18px;
+}
+
+/* The archetype id shown beside each section title, as in the mockup. */
+.archetype-id {
+  font-family: var(--eps-mono);
+  font-size: 10.5px;
+  color: var(--eps-text-muted);
+  background: var(--eps-teal-50);
+  border: 1px solid var(--eps-teal-100);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px;
+}
+
+.tile {
+  background: var(--eps-surface);
+  border: 1px solid var(--eps-border);
+  border-radius: var(--eps-radius);
+  padding: 16px 18px;
+  box-shadow: var(--eps-shadow);
+}
+
+.tile .value {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--eps-teal-800);
+}
+
+.tile .label {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--eps-text-muted);
+}
+
+/* --- buttons -------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border: 1px solid var(--eps-border-strong);
+  border-radius: var(--eps-radius-sm);
+  background: var(--eps-surface);
+  color: var(--eps-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--eps-teal-50);
+  border-color: var(--eps-teal-500);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn.primary {
+  background: var(--eps-teal-600);
+  border-color: var(--eps-teal-600);
+  color: #fff;
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: var(--eps-teal-700);
+  border-color: var(--eps-teal-700);
+}
+
+.btn.large {
+  padding: 10px 18px;
+  font-size: 14px;
+}
+
+/* --- status & messages ---------------------------------------------------- */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  background: var(--eps-teal-50);
+  color: var(--eps-teal-800);
+  border: 1px solid var(--eps-teal-100);
+}
+
+.pill.up {
+  background: var(--eps-success-bg);
+  color: var(--eps-success);
+  border-color: #bfe0ca;
+}
+
+.pill.down {
+  background: var(--eps-danger-bg);
+  color: var(--eps-danger);
+  border-color: #f3c9c5;
+}
+
+.pill.demo {
+  background: var(--eps-warning-bg);
+  color: var(--eps-warning);
+  border-color: #efdcb4;
+}
+
+.message {
+  padding: 11px 14px;
+  border-radius: var(--eps-radius-sm);
+  font-size: 13px;
+  border: 1px solid transparent;
+  white-space: pre-wrap;
+}
+
+.message.error {
+  background: var(--eps-danger-bg);
+  color: var(--eps-danger);
+  border-color: #f3c9c5;
+}
+
+.message.success {
+  background: var(--eps-success-bg);
+  color: var(--eps-success);
+  border-color: #bfe0ca;
+}
+
+.message.warning {
+  background: var(--eps-warning-bg);
+  color: var(--eps-warning);
+  border-color: #f0dcb4;
+}
+
+.message.info {
+  background: var(--eps-teal-50);
+  color: var(--eps-teal-800);
+  border-color: var(--eps-teal-100);
+}
+
+.empty {
+  padding: 32px 18px;
+  text-align: center;
+  color: var(--eps-text-muted);
+  font-size: 13px;
+}
+
+.muted {
+  color: var(--eps-text-muted);
+}
+
+.mono {
+  font-family: var(--eps-mono);
+  font-size: 12px;
+}
+
+pre.output {
+  margin: 0;
+  padding: 13px 15px;
+  background: #0f1c20;
+  color: #d6e6e8;
+  border-radius: var(--eps-radius-sm);
+  font-family: var(--eps-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 340px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* --- forms (our own controls, not mb-*) ----------------------------------- */
+
+.field-label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--eps-text-muted);
+}
+
+input.text,
+select.text,
+textarea.text {
+  width: 100%;
+  padding: 8px 11px;
+  border: 1px solid var(--eps-border-strong);
+  border-radius: var(--eps-radius-sm);
+  background: var(--eps-surface);
+  font: inherit;
+  font-size: 13px;
+  color: var(--eps-text);
+}
+
+input.text:focus,
+select.text:focus,
+textarea.text:focus {
+  outline: 2px solid var(--eps-teal-500);
+  outline-offset: -1px;
+  border-color: var(--eps-teal-500);
+}
+
+.spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--eps-teal-100);
+  border-top-color: var(--eps-teal-600);
+  border-radius: 50%;
+  animation: eps-spin 0.7s linear infinite;
+}
+
+@keyframes eps-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2.4s;
+  }
+}

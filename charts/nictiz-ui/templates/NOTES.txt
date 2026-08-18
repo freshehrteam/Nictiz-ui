@@ -1,0 +1,65 @@
+nictiz-ui {{ .Chart.AppVersion }} deployed as release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+  URL:   http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}
+  Image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+
+Before it works, check these in order:
+
+1) DNS — {{ .Values.ingress.host }} must resolve to the hcloud load balancer IP:
+     terraform -chdir=<stack>/terraform/envs/hetzner output load_balancer_ipv4
+
+{{ if .Values.auth.basicAuth.enabled }}
+2) Basic-auth Secret "{{ include "nictiz-ui.basicAuthSecretName" . }}" must exist in this namespace.
+{{- if not .Values.auth.basicAuth.create }}
+   This chart did NOT create it (auth.basicAuth.create=false, the safe default).
+   Create it now, or every request will 503:
+
+     htpasswd -nbB <username> '<password>' > auth
+     kubectl create secret generic {{ include "nictiz-ui.basicAuthSecretName" . }} \
+       -n {{ .Release.Namespace }} --from-file=auth
+     rm auth
+
+   Verify:  kubectl get secret {{ include "nictiz-ui.basicAuthSecretName" . }} -n {{ .Release.Namespace }}
+{{- else }}
+   ⚠ This chart rendered the Secret from values (auth.basicAuth.create=true).
+   The credential is in your values file and in the Helm release history.
+   Acceptable for a demo cluster; do not do this for anything real.
+{{- end }}
+{{ else }}
+2) ⚠ BASIC-AUTH IS DISABLED (auth.basicAuth.enabled=false).
+   Nothing gates this host. The BFF applies no per-user access control, so
+   anyone who reaches {{ .Values.ingress.host }} can read and write EVERY record
+   in the CDR.
+{{- if .Values.auth.required }}
+   auth.required is still true, so the BFF will 401 everything — the app will be
+   unreachable rather than exposed. That is the intended failure direction, but
+   it does mean this configuration is not usable as-is.
+{{- end }}
+{{ end }}
+3) EHRbase credentials come from Secret "{{ .Values.ehrbase.auth.existingSecret }}", which is
+   owned by the health-stack release. It must be in THIS namespace:
+
+     kubectl get secret {{ .Values.ehrbase.auth.existingSecret }} -n {{ .Release.Namespace }}
+
+   Missing → the pod stays in CreateContainerConfigError.
+
+4) Watch it come up:
+
+     kubectl rollout status deploy/{{ include "nictiz-ui.fullname" . }} -n {{ .Release.Namespace }}
+     kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "nictiz-ui.name" . }} -f
+
+5) Verify end-to-end (expect 401 without credentials, 200 with):
+
+     curl -o /dev/null -w '%{http_code}\n' https://{{ .Values.ingress.host }}/api/health
+     curl -u <username> https://{{ .Values.ingress.host }}/api/health
+
+   /api/health reports whether the BFF can reach EHRbase and HAPI — that is the
+   check that tells you the two releases are actually wired together.
+
+{{- if .Values.auth.required }}
+
+NOTE: REQUIRE_AUTH is on, so the BFF rejects any request without a proxy
+identity. A direct `kubectl port-forward` to the Service will therefore 401 —
+that is deliberate, not a bug. Use `-H 'Authorization: Basic ...'` to test
+through the port-forward, or go through the ingress.
+{{- end }}

@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nictiz-ui.fullname" . }}
+  labels:
+    {{- include "nictiz-ui.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "nictiz-ui.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "nictiz-ui.labels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: nictiz-ui
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+          env:
+            - name: PORT
+              value: {{ .Values.service.targetPort | quote }}
+
+            # Upstreams: in-cluster Service DNS, never the public ingress.
+            - name: EHRBASE_BASE
+              value: {{ .Values.upstreams.ehrbaseBase | quote }}
+            - name: FHIR_BASE
+              value: {{ .Values.upstreams.fhirBase | quote }}
+            - name: OPENFHIR_BASE
+              value: {{ .Values.upstreams.openfhirBase | quote }}
+
+            # EHRbase Basic auth, read from the Secret the health-stack release
+            # owns. Referenced rather than copied so there is exactly one source
+            # of truth for this password across the two releases.
+            - name: EHRBASE_AUTH_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ehrbase.auth.existingSecret | quote }}
+                  key: {{ .Values.ehrbase.auth.userKey | quote }}
+            - name: EHRBASE_AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ehrbase.auth.existingSecret | quote }}
+                  key: {{ .Values.ehrbase.auth.passwordKey | quote }}
+
+            # Auth posture. REQUIRE_AUTH makes the BFF reject anything that did
+            # not arrive through the authenticating ingress.
+            - name: REQUIRE_AUTH
+              value: {{ .Values.auth.required | quote }}
+            - name: AUTH_USER_HEADER
+              value: {{ .Values.auth.userHeader | quote }}
+            - name: AUTH_EMAIL_HEADER
+              value: {{ .Values.auth.emailHeader | quote }}
+            - name: DEFAULT_USER_NAME
+              value: {{ .Values.auth.defaultUserName | quote }}
+            # Derive the caller's identity from the Authorization header that
+            # ingress-nginx's basic-auth forwards. Only meaningful when
+            # basic-auth is the gate; an OIDC proxy sends a real identity
+            # header, which takes precedence in the BFF regardless.
+            - name: TRUST_BASIC_AUTH
+              value: {{ .Values.auth.basicAuth.enabled | quote }}
+
+            # Serving the SPA from this same process is what makes /api
+            # same-origin, which is why no CORS configuration is needed here.
+            - name: STATIC_DIR
+              value: /app/dist
+
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          volumeMounts:
+            # readOnlyRootFilesystem is on, but tsx creates a cache directory
+            # (/tmp/tsx-<uid>) at startup. Verified: without a writable /tmp the
+            # container dies immediately with ENOENT on mkdir '/tmp/tsx-1000'.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

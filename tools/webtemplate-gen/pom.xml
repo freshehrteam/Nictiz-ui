@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>org.freshehr</groupId>
+  <artifactId>webtemplate-gen</artifactId>
+  <version>1.0.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <name>webtemplate-gen</name>
+  <description>Converts an openEHR operational template (OPT XML) into web template JSON.</description>
+
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- Must match the jars already present in ~/.m2 so the build works fully offline. -->
+    <ehrbase.sdk.version>2.19.0</ehrbase.sdk.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.ehrbase.openehr.sdk</groupId>
+      <artifactId>web-template</artifactId>
+      <version>${ehrbase.sdk.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.ehrbase.openehr.sdk</groupId>
+      <artifactId>opt-1.4</artifactId>
+      <version>${ehrbase.sdk.version}</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.1.1</version>
+        <configuration>
+          <mainClass>org.freshehr.WebTemplateGen</mainClass>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

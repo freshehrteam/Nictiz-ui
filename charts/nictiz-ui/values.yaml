@@ -1,0 +1,212 @@
+# ============================================================================
+# nictiz-ui — default values
+# ----------------------------------------------------------------------------
+# Deployed as its own Helm release, into the SAME namespace as the health-stack
+# release. Same-namespace is not cosmetic: the BFF reaches EHRbase/HAPI/openFHIR
+# over their in-cluster Service names, and it consumes the EHRbase API password
+# from a Secret that the health-stack release owns.
+#
+#   helm upgrade --install nictiz-ui charts/nictiz-ui \
+#     -n health-stack \
+#     -f charts/nictiz-ui/values-hetzner.yaml
+# ============================================================================
+
+replicaCount: 2
+
+image:
+  repository: openfhir/nictiz-ui
+  # Overridden per environment with an immutable tag. `latest` is a dev default;
+  # pinning matters because a rolling restart would otherwise silently change
+  # which build is serving.
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3001
+
+# ── Upstreams ────────────────────────────────────────────────────────────────
+# In-cluster Service DNS, NOT the public ingress. Two reasons: the traffic never
+# leaves the cluster (no TLS termination, no LB hop), and it does not pass back
+# through the basic-auth gate — which would reject the BFF's own server-to-server
+# calls, since those carry EHRbase credentials rather than a browser's.
+#
+# NOTE openfhir has NO /openfhir prefix here. The engine serves at its root; the
+# prefix exists only as an ingress rewrite for browser-facing traffic.
+upstreams:
+  ehrbaseBase: http://ehrbase:8080/ehrbase/rest/openehr/v1
+  fhirBase: http://hapi:8080/fhir
+  openfhirBase: http://openfhir:8080
+
+# ── EHRbase credentials ──────────────────────────────────────────────────────
+# The BFF holds ONE shared EHRbase credential (it applies no per-user access
+# control of its own — see the Security note in the app README).
+#
+# `existingSecret` is the supported path and the reason the two charts stay
+# decoupled: Terraform generates the EHRbase API password once, the health-stack
+# release renders it into its `ehrbase-secret`, and this release READS the same
+# key. Copying the value into this chart's own values would create a second
+# source of truth that silently drifts the moment the password rotates — and the
+# symptom would be every BFF call 401ing against a CDR that is working fine.
+ehrbase:
+  auth:
+    # Secret owned by the health-stack release, in the same namespace.
+    existingSecret: ehrbase-secret
+    # Keys within it. These match what health-stack's secrets.yaml renders from
+    # Terraform's `secrets.values.ehrbase.SECURITY_AUTH*`.
+    userKey: SECURITY_AUTHUSER
+    passwordKey: SECURITY_AUTHPASSWORD
+
+# ── Authentication ───────────────────────────────────────────────────────────
+# The BFF performs NO authentication itself. The ingress does, and the BFF then
+# refuses any request that did not come through it (`requireUpstreamAuth`).
+auth:
+  # Fail closed. With this on, a request arriving without the proxy's identity
+  # header is rejected 401 — so a misconfigured ingress, a port-forward, or a
+  # NetworkPolicy gap cannot quietly expose the whole CDR.
+  #
+  # Turn this OFF only for a cluster with no ingress in front, and understand
+  # that this means unauthenticated read/write access to every record.
+  required: true
+
+  # Headers naming the authenticated user. These are oauth2-proxy's defaults and
+  # are checked FIRST, so putting a real IdP in front later starts producing
+  # per-user identity with no application change.
+  #
+  # ingress-nginx's basic-auth does not set them — forwarding $remote_user needs
+  # the auth-snippet annotation, which since v1.9 requires enabling
+  # allow-snippet-annotations AND annotations-risk-level=Critical cluster-wide.
+  # Rather than weaken the shared ingress controller for every tenant, the BFF
+  # reads the username from the Authorization header nginx already forwards
+  # (see TRUST_BASIC_AUTH in the Deployment).
+  userHeader: x-auth-request-user
+  emailHeader: x-auth-request-email
+
+  # Display name written to `composer|name` on every composition.
+  #
+  # With ingress basic-auth this is a SHARED login, so it is a deployment
+  # identity and not a person. It is deliberately not a plausible clinician
+  # name: a record in the CDR must not look like it was authored by a specific
+  # human when the system cannot tell who was at the keyboard. Replace this with
+  # per-user identity (an IdP) before anything clinical depends on attribution.
+  defaultUserName: Demo User
+
+  # ── Ingress basic-auth ─────────────────────────────────────────────────────
+  # nginx checks credentials against an htpasswd Secret before proxying.
+  basicAuth:
+    enabled: true
+
+    # Name of the Secret holding the htpasswd file (key: `auth`).
+    secretName: nictiz-ui-basic-auth
+
+    # Whether THIS chart creates that Secret. Default false: it holds a
+    # credential, and a password living in a values file tends to end up in git.
+    # Create it out-of-band instead:
+    #
+    #   htpasswd -nbB demo 'a-strong-password' > auth
+    #   kubectl create secret generic nictiz-ui-basic-auth \
+    #     -n health-stack --from-file=auth
+    #   rm auth
+    #
+    # Note -B (bcrypt): nginx also accepts weaker hashes, but they are trivially
+    # crackable if the Secret ever leaks.
+    create: false
+
+    # Only read when create=true — for a throwaway demo cluster. Must already be
+    # htpasswd-formatted (user:$2y$...). A plaintext password here does not
+    # work; nginx compares against a hash.
+    htpasswd: ""
+
+    realm: "Nictiz openEHR EMR"
+
+# ── NetworkPolicy ────────────────────────────────────────────────────────────
+# Restricts pod ingress to the ingress-nginx controller.
+#
+# This is what backs the BFF's trust in the proxy's identity header. Without it,
+# any workload in the cluster (or anyone who can `kubectl port-forward`) can
+# reach port 3001 directly, set X-Auth-Request-User to whatever it likes, and be
+# believed — basic-auth bypassed entirely. The BFF cannot defend against that on
+# its own: trusting the proxy is inherent to forward-auth, so the network has to
+# be what makes "came through the proxy" true.
+#
+# k3s enforces NetworkPolicy out of the box (kube-router), and the stack's
+# cloud-init does not disable it, so this is effective on the Hetzner target.
+networkPolicy:
+  enabled: true
+
+  # The ingress-nginx controller, which Terraform installs into its own
+  # namespace. Selecting by namespace label rather than pod label keeps this
+  # working across ingress-nginx chart upgrades that rename pod labels.
+  #
+  # `kubernetes.io/metadata.name` is set automatically by the API server on
+  # every namespace (NamespaceDefaultLabelName), so it needs no manual labelling.
+  allowFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+
+# ── Ingress ──────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+
+  # Must resolve to the hcloud load balancer IP that Terraform outputs.
+  host: nictiz-demo.yourdomain.com
+
+  annotations:
+    # FHIR Bundles and OPT uploads exceed ingress-nginx's 1 MB default, which
+    # would 413 mid-save. Same reasoning as the health-stack chart.
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+
+  tls:
+    enabled: true
+    clusterIssuer: letsencrypt-prod
+    secretName: nictiz-ui-tls
+
+# ── Probes ───────────────────────────────────────────────────────────────────
+# /healthz is served BEFORE the auth guard in the BFF — probes are not
+# authenticated callers, and gating them would keep the Deployment from ever
+# going ready.
+probes:
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 10
+    periodSeconds: 20
+  readiness:
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    failureThreshold: 3
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Pod scheduling.
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Applied to the pod. The image already runs as the unprivileged `node` user;
+# this makes the guarantee explicit and enforced by the API server.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL

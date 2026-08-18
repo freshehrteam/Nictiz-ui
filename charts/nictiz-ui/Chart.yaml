@@ -1,0 +1,25 @@
+apiVersion: v2
+name: nictiz-ui
+description: Nictiz openEHR EMR — SPA + BFF, deployed alongside the freshehr health-stack
+type: application
+
+# Chart version. CI overrides this from the git tag on release (v0.1.0 → 0.1.0),
+# the same convention the health-stack chart uses.
+version: 0.1.0
+
+# The application version tracks app/package.json. `images.nictizUi.tag` is what
+# actually decides which image runs; this is metadata.
+appVersion: "0.1.0"
+
+keywords:
+  - openehr
+  - fhir
+  - ehrbase
+  - nictiz
+
+annotations:
+  # Deliberately a SEPARATE release from health-stack, not a subchart: the two
+  # live in different repositories and release independently. What couples them
+  # is the EHRbase credential, which is why `ehrbase.existingSecret` points at a
+  # Secret the health-stack release already owns rather than re-declaring it.
+  freshehr.io/companion-chart: health-stack

@@ -1,0 +1,53 @@
+# ============================================================================
+# Hetzner (prod) values — k3s on hcloud, alongside the health-stack release.
+#
+#   helm upgrade --install nictiz-ui charts/nictiz-ui \
+#     -n health-stack \
+#     -f charts/nictiz-ui/values-hetzner.yaml \
+#     --set image.tag=v0.1.0
+#
+# The namespace MUST be the one the health-stack release occupies (health-stack).
+# The BFF resolves ehrbase/hapi/openfhir by bare Service name and reads the
+# EHRbase password from that release's Secret; both are namespace-local.
+# ============================================================================
+
+# Pin an immutable tag in production. CI publishes both a semver and a sha tag —
+# `latest` would mean a rolling restart silently changes which build is serving.
+image:
+  repository: openfhir/nictiz-ui
+  tag: v0.1.0
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+ingress:
+  host: nictiz-demo.yourdomain.com
+  tls:
+    enabled: true
+    # cert-manager + this ClusterIssuer are installed by the stack's Terraform
+    # (modules/k8s-apps). This chart references it; it does not create it.
+    clusterIssuer: letsencrypt-prod
+    secretName: nictiz-ui-tls
+
+auth:
+  # Fail closed: the BFF refuses anything that did not come through the ingress.
+  required: true
+
+  basicAuth:
+    enabled: true
+    secretName: nictiz-ui-basic-auth
+    # Created out-of-band — see NOTES/README. Never true in this file: the value
+    # would be a live credential sitting in git.
+    create: false
+
+  # Shared login, so this is a deployment identity rather than a person. Every
+  # composition is filed under it. See values.yaml for why it is not a name.
+  defaultUserName: Demo User
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 192Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi

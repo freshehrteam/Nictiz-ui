@@ -1,0 +1,1312 @@
+/**
+ * Per-view styling, scoped by component tag.
+ *
+ * Everything here would be `static styles` in a normal Lit app. It cannot be:
+ * every component below renders into light DOM so `mb-form` can find its
+ * children, and Lit drops `static styles` outside a shadow root. See theme.css.
+ */
+
+/* --- patients ------------------------------------------------------------- */
+
+eps-patients {
+  display: block;
+}
+
+eps-patients .search-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+eps-patients .search-row input {
+  flex: 1;
+  max-width: 420px;
+}
+
+/* --- new patient form ----------------------------------------------------- */
+
+eps-patients .new-patient-form {
+  margin-bottom: 18px;
+}
+
+eps-patients .field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+}
+
+eps-patients .req {
+  color: var(--eps-danger);
+}
+
+eps-patients input.invalid {
+  border-color: var(--eps-danger);
+}
+
+eps-patients input.invalid:focus {
+  outline-color: var(--eps-danger);
+}
+
+eps-patients .field-error {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--eps-danger);
+}
+
+eps-patients .form-note {
+  margin: 14px 0 0;
+  font-size: 12px;
+}
+
+eps-patients .form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--eps-border);
+}
+
+eps-patients .patient-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+eps-patients .patient-card {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 15px 16px;
+  background: var(--eps-surface);
+  border: 1px solid var(--eps-border);
+  border-radius: var(--eps-radius);
+  box-shadow: var(--eps-shadow);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  width: 100%;
+}
+
+eps-patients .patient-card:hover {
+  border-color: var(--eps-teal-500);
+  box-shadow: 0 2px 4px rgb(22 36 42 / 10%), 0 8px 18px rgb(22 36 42 / 8%);
+}
+
+eps-patients .patient-card .avatar,
+eps-patient-header .avatar {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--eps-teal-600);
+  color: #fff;
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+}
+
+eps-patients .patient-card .name {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+eps-patients .patient-card .meta {
+  font-size: 12px;
+  color: var(--eps-text-muted);
+}
+
+eps-patients .patient-card .bsn {
+  font-family: var(--eps-mono);
+  font-size: 11px;
+  color: var(--eps-text-muted);
+}
+
+/* --- patient header (mockup: name, age, sex, DOB) ------------------------- */
+
+eps-patient-header {
+  display: block;
+  background: var(--eps-surface);
+  border-bottom: 1px solid var(--eps-border);
+  padding: 14px 28px;
+}
+
+eps-patient-header .row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+eps-patient-header .name {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+eps-patient-header .demographics {
+  display: flex;
+  gap: 16px;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--eps-text-muted);
+}
+
+eps-patient-header .demographics b {
+  color: var(--eps-text);
+  font-weight: 500;
+}
+
+eps-patient-header .spacer {
+  flex: 1;
+}
+
+/* --- compositions browser (two panes) ------------------------------------- */
+
+eps-compositions {
+  display: block;
+}
+
+eps-compositions .panes {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+eps-compositions .template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+}
+
+/* A row pairs the template with its own "+ New", so creating a composition
+   always names the template it is for. */
+eps-compositions .template-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--eps-radius-sm);
+}
+
+eps-compositions .template-row:hover {
+  background: var(--eps-teal-50);
+}
+
+/* The id is what may be truncated — the tag next to it must stay whole, or it
+   reads as a different word ("NO FORM Y…"). */
+eps-compositions .template-row .template-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+eps-compositions .template-row .template-name .id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Listed for reference, but nothing can be recorded against it. */
+eps-compositions .template-row.unsupported .template-item {
+  color: var(--eps-text-muted);
+}
+
+eps-compositions .template-row .tag {
+  flex: none;
+  white-space: nowrap;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--eps-text-muted);
+  border: 1px solid var(--eps-border);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
+eps-compositions .template-new {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-right: 6px;
+  border: 1px solid var(--eps-border);
+  border-radius: var(--eps-radius-sm);
+  background: var(--eps-surface);
+  color: var(--eps-teal-800);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+eps-compositions .template-new:hover {
+  background: var(--eps-teal-800);
+  border-color: var(--eps-teal-800);
+  color: #fff;
+}
+
+eps-compositions .template-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-top: 1px solid var(--eps-border);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--eps-text-muted);
+}
+
+eps-compositions .template-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: var(--eps-radius-sm);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--eps-text);
+}
+
+/* Selection is drawn on the whole row, so the "+ New" button sits inside the
+   highlight rather than beside it. */
+eps-compositions .template-row:has(.template-item[aria-selected='true']) {
+  background: var(--eps-teal-100);
+}
+
+eps-compositions .template-item[aria-selected='true'] {
+  font-weight: 600;
+}
+
+eps-compositions .template-item .count {
+  flex: none;
+  font-size: 11px;
+  color: var(--eps-text-muted);
+  background: var(--eps-surface);
+  border: 1px solid var(--eps-border);
+  border-radius: 999px;
+  padding: 0 7px;
+}
+
+/* A template the patient has no records under is still listed — the count is
+   dimmed rather than the row being absent, which is what used to happen. */
+eps-compositions .template-item .count.zero {
+  opacity: 0.45;
+}
+
+eps-compositions .composition-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--eps-border);
+  border-radius: 0 0 var(--eps-radius) var(--eps-radius);
+  overflow: hidden;
+}
+
+eps-compositions .composition-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 18px;
+  border: 0;
+  background: var(--eps-surface);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+eps-compositions .composition-item:hover {
+  background: var(--eps-teal-50);
+}
+
+eps-compositions .composition-item .when {
+  font-weight: 500;
+  font-size: 13px;
+}
+
+eps-compositions .composition-item .uid {
+  font-family: var(--eps-mono);
+  font-size: 11px;
+  color: var(--eps-text-muted);
+}
+
+eps-compositions .composition-item .chev {
+  margin-left: auto;
+  color: var(--eps-text-muted);
+}
+
+/* "New composition" is the primary action on this view — see plan P5. */
+eps-compositions .new-composition {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 16px 18px;
+  background: linear-gradient(135deg, var(--eps-teal-800), var(--eps-teal-600));
+  color: #fff;
+  border-radius: var(--eps-radius);
+  box-shadow: var(--eps-shadow);
+}
+
+eps-compositions .new-composition h3 {
+  margin: 0 0 2px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+eps-compositions .new-composition p {
+  margin: 0;
+  font-size: 12.5px;
+  color: rgb(255 255 255 / 78%);
+}
+
+eps-compositions .new-composition .btn {
+  background: #fff;
+  border-color: #fff;
+  color: var(--eps-teal-800);
+  font-weight: 600;
+  flex: none;
+}
+
+eps-compositions .new-composition .btn:hover:not(:disabled) {
+  background: var(--eps-teal-50);
+  border-color: var(--eps-teal-50);
+}
+
+/* --- composition form ----------------------------------------------------- */
+
+eps-composition-form {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+eps-composition-form .form-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 28px calc(var(--eps-footer-height) + 24px);
+}
+
+eps-composition-form .section-card {
+  margin-bottom: 16px;
+  background: var(--eps-surface);
+  border: 1px solid var(--eps-border);
+  border-radius: var(--eps-radius);
+  box-shadow: var(--eps-shadow);
+  overflow: hidden;
+}
+
+eps-composition-form .section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--eps-border);
+  background: var(--eps-teal-50);
+}
+
+eps-composition-form .section-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--eps-teal-900);
+}
+
+eps-composition-form .section-body {
+  padding: 14px;
+}
+
+/* Composer and recorded-date are stated, not asked for — see forms/context.ts. */
+eps-composition-form .context-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 40px;
+  margin: 0;
+}
+
+eps-composition-form .context-facts dt {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--eps-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+eps-composition-form .context-facts dd {
+  margin: 2px 0 0;
+  font-size: 13.5px;
+  color: var(--eps-text);
+}
+
+/* --- the three-way section choice ----------------------------------------- */
+
+eps-composition-form .section-choice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+/* Plain buttons, deliberately: the mode is UI state and an mb-* control would
+   register itself with mb-form and be exported as a field. */
+eps-composition-form .mode-switcher {
+  display: inline-flex;
+  padding: 2px;
+  background: var(--eps-bg);
+  border: 1px solid var(--eps-border);
+  border-radius: 999px;
+}
+
+eps-composition-form .mode-option {
+  padding: 5px 14px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--eps-text-muted);
+  cursor: pointer;
+}
+
+eps-composition-form .mode-option:hover {
+  color: var(--eps-teal-800);
+}
+
+eps-composition-form .mode-option.selected {
+  background: var(--eps-teal-600);
+  color: #fff;
+  font-weight: 500;
+}
+
+eps-composition-form .mode-option:focus-visible {
+  outline: 2px solid var(--eps-teal-500);
+  outline-offset: 2px;
+}
+
+eps-composition-form .mode-caption {
+  font-size: 12.5px;
+  color: var(--eps-text-muted);
+}
+
+eps-composition-form .mode-pill {
+  margin-left: 2px;
+}
+
+/* --- compact field layout -------------------------------------------------- */
+
+/* Short controls flow into columns; the grid gap supplies the spacing that the
+   mb-* margin below used to. */
+eps-composition-form .field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px 14px;
+  align-items: start;
+}
+
+/* For controls that need the whole row: terminology searches, which render a
+   result list, and free-text comments. */
+eps-composition-form .field-wide {
+  grid-column: 1 / -1;
+}
+
+/* The last control in a grid cell should not push the cell taller than the
+   gap already allows. */
+eps-composition-form .field-grid > mb-input,
+eps-composition-form .field-grid > mb-date,
+eps-composition-form .field-grid > mb-search,
+eps-composition-form .field-grid > mb-select,
+eps-composition-form .field-grid > mb-text-select,
+eps-composition-form .field-grid > mb-buttons,
+eps-composition-form .field-grid > mb-quantity,
+eps-composition-form .field-grid > mb-repeatable-simple,
+eps-composition-form .field-wide > :last-child {
+  margin-bottom: 0;
+}
+
+/* The sticky save footer from the mockup. */
+eps-composition-form .save-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: var(--eps-footer-height);
+  padding: 0 28px;
+  background: var(--eps-surface);
+  border-top: 1px solid var(--eps-border);
+  box-shadow: 0 -2px 10px rgb(22 36 42 / 6%);
+}
+
+eps-composition-form .save-footer .spacer {
+  flex: 1;
+}
+
+eps-composition-form .save-status {
+  font-size: 12.5px;
+  color: var(--eps-text-muted);
+}
+
+/* --- Medblocks controls inside our cards ---------------------------------- */
+
+eps-composition-form mb-form {
+  display: block;
+}
+
+eps-composition-form fieldset.entry,
+eps-composition-form fieldset.nested {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--eps-border);
+  border-radius: var(--eps-radius-sm);
+  background: var(--eps-surface);
+}
+
+eps-composition-form fieldset.nested {
+  background: var(--eps-bg);
+  margin-top: 12px;
+}
+
+eps-composition-form fieldset legend {
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--eps-teal-700);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* mb-* elements are block-level with breathing room; Medblocks ships none. */
+eps-composition-form mb-input,
+eps-composition-form mb-date,
+eps-composition-form mb-search,
+eps-composition-form mb-select,
+eps-composition-form mb-text-select,
+eps-composition-form mb-buttons,
+eps-composition-form mb-quantity {
+  display: block;
+  margin-bottom: 8px;
+}
+
+eps-composition-form mb-repeatable-simple {
+  display: block;
+  margin-bottom: 8px;
+}
+
+eps-composition-form section h2 {
+  display: none; /* section titles come from our own card heads */
+}
+
+/* --- settings ------------------------------------------------------------- */
+
+eps-settings {
+  display: block;
+}
+
+eps-settings .settings-grid {
+  display: grid;
+  gap: 16px;
+  max-width: 900px;
+}
+
+eps-settings .kv {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  gap: 8px 14px;
+  font-size: 13px;
+}
+
+eps-settings .kv dt {
+  color: var(--eps-text-muted);
+}
+
+eps-settings .kv dd {
+  margin: 0;
+  font-family: var(--eps-mono);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+eps-settings .template-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--eps-border);
+  font-size: 13px;
+}
+
+eps-settings .template-row:last-child {
+  border-bottom: 0;
+}
+
+eps-settings .upload-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* --- dashboard ------------------------------------------------------------ */
+
+eps-dashboard {
+  display: block;
+}
+
+eps-dashboard .dash-grid {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+/* ===========================================================================
+   eps-save-pipeline — the modal shown while a composition is committed.
+
+   Scoped under the tag name like every other component here: these elements
+   render into light DOM, so `static styles` would be dropped (theme.css).
+   =========================================================================== */
+
+eps-save-pipeline .pipeline-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(11 59 60 / 55%);
+  backdrop-filter: blur(2px);
+  animation: eps-fade-in 0.2s ease-out;
+}
+
+eps-save-pipeline .pipeline-card {
+  width: 100%;
+  max-width: 560px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 30px 32px 28px;
+  border-radius: 16px;
+  background: var(--eps-surface);
+  box-shadow: 0 18px 60px rgb(11 59 60 / 30%);
+  animation: eps-pipeline-in 0.28s cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+
+eps-save-pipeline .pipeline-head h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--eps-teal-900);
+}
+
+eps-save-pipeline .pipeline-head p {
+  margin: 5px 0 0;
+  font-size: 13px;
+  color: var(--eps-text-muted);
+}
+
+/* Progress rail. Fills as steps complete; freezes teal->amber on failure. */
+eps-save-pipeline .pipeline-progress {
+  height: 6px;
+  margin: 20px 0 24px;
+  border-radius: 999px;
+  background: var(--eps-teal-100);
+  overflow: hidden;
+}
+
+eps-save-pipeline .pipeline-progress span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--eps-teal-600);
+  transition: width 0.45s cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+
+eps-save-pipeline .pipeline-progress.failed span {
+  background: var(--eps-danger);
+}
+
+eps-save-pipeline .pipeline-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+eps-save-pipeline .step {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+/* A step not yet attempted is dimmed rather than hidden, so the pipeline's
+   full shape — and, on failure, exactly what was never tried — stays legible. */
+eps-save-pipeline .step.pending {
+  opacity: 0.42;
+}
+
+eps-save-pipeline .step-icon {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  margin-top: 1px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+}
+
+eps-save-pipeline .step-icon.done {
+  background: var(--eps-teal-600);
+}
+
+eps-save-pipeline .step-icon.failed {
+  background: var(--eps-danger);
+}
+
+eps-save-pipeline .step-icon.pending {
+  border: 2px solid var(--eps-border-strong);
+  background: transparent;
+}
+
+/* The in-flight step: a filled dot with a pulsing halo. */
+eps-save-pipeline .step-icon.running {
+  background: var(--eps-teal-600);
+  animation: eps-pipeline-pulse 1.4s ease-out infinite;
+}
+
+eps-save-pipeline .step-body {
+  min-width: 0;
+  flex: 1;
+}
+
+eps-save-pipeline .step-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--eps-text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Marks the two steps that are demo theatre rather than a real request. */
+eps-save-pipeline .step-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--eps-warning);
+  background: var(--eps-warning-bg);
+  border-radius: 999px;
+  padding: 2px 8px;
+  cursor: help;
+}
+
+eps-save-pipeline .step-line {
+  margin-top: 4px;
+  font-family: var(--eps-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--eps-teal-700);
+  overflow-wrap: anywhere;
+}
+
+eps-save-pipeline .step-line .chev {
+  color: var(--eps-text-muted);
+  margin-right: 4px;
+}
+
+eps-save-pipeline .step.failed .step-line {
+  color: var(--eps-danger);
+}
+
+/* A step that succeeded but has something worth mentioning — a read-back that
+   differs. Amber rather than red: the composition IS stored. */
+eps-save-pipeline .step-note {
+  margin-top: 6px;
+  padding: 5px 10px;
+  border-left: 2px solid var(--eps-warning);
+  border-radius: 0 var(--eps-radius-sm) var(--eps-radius-sm) 0;
+  background: var(--eps-warning-bg);
+  color: var(--eps-warning);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+eps-save-pipeline .pipeline-note {
+  margin: 24px 0 18px;
+  font-size: 11.5px;
+  color: var(--eps-text-muted);
+}
+
+eps-save-pipeline .pipeline-note .mono {
+  font-family: var(--eps-mono);
+}
+
+eps-save-pipeline .pipeline-cta {
+  width: 100%;
+  justify-content: center;
+}
+
+@keyframes eps-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes eps-pipeline-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes eps-pipeline-pulse {
+  0%   { box-shadow: 0 0 0 0 rgb(26 122 126 / 55%); }
+  70%  { box-shadow: 0 0 0 9px rgb(26 122 126 / 0%); }
+  100% { box-shadow: 0 0 0 0 rgb(26 122 126 / 0%); }
+}
+
+/* Motion here is decorative: the step states are carried by icon and colour,
+   so removing it costs no information. */
+@media (prefers-reduced-motion: reduce) {
+  eps-save-pipeline .pipeline-backdrop,
+  eps-save-pipeline .pipeline-card {
+    animation: none;
+  }
+
+  eps-save-pipeline .step-icon.running {
+    animation-duration: 3s;
+  }
+
+  eps-save-pipeline .pipeline-progress span {
+    transition: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Mandatory fields (min=1 in the OPT)
+ *
+ * The asterisk and the red marks are driven by `data-required` / `data-missing`
+ * attributes that the view stamps onto mb-* hosts — NOT by Medblocks' own
+ * `required` property, which mb-search and mb-select do not implement at all.
+ * Since those two are what the most important mandatory fields render as, using
+ * the library's own flag would style some fields and silently skip the rest.
+ *
+ * These are light-DOM children (mandatory for mb-form slotting), so the marks
+ * can be styled from here; the components' internals cannot be, hence the
+ * outline/background approach rather than restyling their inner inputs.
+ * ------------------------------------------------------------------------- */
+
+/* The asterisk sits on the label the component renders inside its own shadow
+   root, which is unreachable — so it is attached to the host instead. */
+eps-composition-form [data-required]::before {
+  content: '*';
+  float: right;
+  margin-left: 4px;
+  color: var(--eps-danger);
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+eps-composition-form [data-missing] {
+  display: block;
+  border-left: 3px solid var(--eps-danger);
+  padding-left: 8px;
+  margin-left: -11px;
+  border-radius: 2px;
+  background: var(--eps-danger-bg);
+}
+
+/* The count + jump links in a section head. */
+eps-composition-form .missing-pill {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--eps-danger);
+  border-radius: 999px;
+  background: var(--eps-danger-bg);
+  color: var(--eps-danger);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+eps-composition-form .missing-link {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--eps-danger);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+eps-composition-form .missing-link:hover {
+  text-decoration: none;
+}
+
+eps-composition-form .section-card.has-missing {
+  border-color: var(--eps-danger);
+}
+
+eps-composition-form .section-card.has-missing .section-head {
+  background: var(--eps-danger-bg);
+}
+
+/* ── eps-patient-summary ───────────────────────────────────────────────────
+   The mapped European Patient Summary. Scoped by tag name because every view
+   here is Light DOM — see the component's class comment. */
+
+eps-patient-summary {
+  display: block;
+}
+
+eps-patient-summary .summary-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+eps-patient-summary .summary-head h2 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+
+eps-patient-summary .summary-head p {
+  margin: 0;
+  color: var(--eps-text-muted);
+  font-size: 13px;
+}
+
+eps-patient-summary .spacer {
+  flex: 1;
+}
+
+eps-patient-summary .summary-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 24px;
+  border: 1px solid var(--eps-border);
+  border-radius: var(--eps-radius);
+  background: var(--eps-surface);
+  color: var(--eps-text-muted);
+}
+
+eps-patient-summary .summary-state.error {
+  border-color: var(--eps-danger);
+  background: var(--eps-danger-bg);
+  color: var(--eps-danger);
+}
+
+eps-patient-summary .summary-state p {
+  margin: 0;
+}
+
+eps-patient-summary .summary-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  border: 1px solid var(--eps-border);
+  border-radius: var(--eps-radius);
+  background: var(--eps-teal-50);
+}
+
+eps-patient-summary .summary-banner .label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--eps-text-muted);
+}
+
+eps-patient-summary .summary-banner .value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--eps-text);
+}
+
+/* Full-width so it sits under the fields rather than becoming another column. */
+eps-patient-summary .banner-note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12px;
+  color: var(--eps-text-muted);
+}
+
+/* ── sections ────────────────────────────────────────────────────────────
+   `<details>` rather than a plain block: all 17 profile sections are on the
+   page whether or not the document carries them, and only the ones it does
+   are worth opening by default. */
+
+eps-patient-summary .eps-section {
+  margin-bottom: 12px;
+  border: 1px solid var(--eps-border);
+  border-radius: var(--eps-radius);
+  background: var(--eps-surface);
+  box-shadow: var(--eps-shadow);
+}
+
+eps-patient-summary .eps-section > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 16px;
+  cursor: pointer;
+  user-select: none;
+}
+
+eps-patient-summary .eps-section[open] > summary {
+  border-bottom: 1px solid var(--eps-border);
+}
+
+eps-patient-summary .eps-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--eps-teal-800);
+}
+
+eps-patient-summary .eps-section-code,
+eps-patient-summary .eps-section-extra {
+  font-size: 11.5px;
+  color: var(--eps-text-muted);
+}
+
+/* Muted whole-section, so "not present" reads as a neutral statement of fact
+   rather than as an error. The viewer makes no conformance judgement. */
+eps-patient-summary .eps-section.absent > summary .eps-section-title {
+  font-weight: 500;
+  color: var(--eps-text-muted);
+}
+
+eps-patient-summary .eps-section-note {
+  margin: 0;
+  padding: 12px 16px;
+  font-size: 13px;
+  font-style: italic;
+  color: var(--eps-text-muted);
+}
+
+/* ── resource cards ──────────────────────────────────────────────────────
+   One card per resource, replacing the old wide table: rows read DOWN, so a
+   resource with 14 populated fields costs nothing horizontally. */
+
+eps-patient-summary .eps-resource {
+  margin: 12px 16px;
+  border: 1px solid var(--eps-border);
+  border-radius: var(--eps-radius-sm);
+  background: var(--eps-surface);
+}
+
+eps-patient-summary .eps-resource > header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--eps-border);
+  background: var(--eps-teal-50);
+}
+
+eps-patient-summary .eps-resource-type {
+  font-family: var(--eps-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--eps-text-muted);
+}
+
+eps-patient-summary .eps-resource-title {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+eps-patient-summary .eps-dl {
+  margin: 0;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
+eps-patient-summary .eps-dp {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) 1fr;
+  gap: 8px 16px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--eps-border);
+}
+
+eps-patient-summary .eps-dp:last-child {
+  border-bottom: 0;
+}
+
+eps-patient-summary .eps-dp dt {
+  color: var(--eps-text-muted);
+}
+
+eps-patient-summary .eps-dp dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+eps-patient-summary .eps-dp-path {
+  display: block;
+  font-size: 10.5px;
+  opacity: 0.7;
+}
+
+/* Absent is muted, never red — an element the document does not carry is not
+   an error here. */
+eps-patient-summary .eps-dp.absent {
+  opacity: 0.55;
+}
+
+eps-patient-summary .eps-dp-value {
+  font-weight: 500;
+}
+
+/* ── codings ─────────────────────────────────────────────────────────────
+   EVERY coding as a `system|code` chip, not just `coding[0]`. */
+
+eps-patient-summary .eps-codings {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+eps-patient-summary .eps-coding {
+  padding: 1px 6px;
+  border: 1px solid var(--eps-border-strong);
+  border-radius: 999px;
+  background: var(--eps-teal-50);
+  font-size: 10.5px;
+  color: var(--eps-text-muted);
+  white-space: nowrap;
+}
+
+eps-patient-summary .eps-raw-toggle {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--eps-border);
+  border-radius: var(--eps-radius-sm);
+  background: transparent;
+  font-size: 10.5px;
+  color: var(--eps-text-muted);
+  cursor: pointer;
+}
+
+eps-patient-summary .eps-raw-toggle:hover {
+  border-color: var(--eps-border-strong);
+}
+
+eps-patient-summary .eps-raw {
+  max-height: 260px;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid var(--eps-border);
+  border-radius: var(--eps-radius-sm);
+  background: var(--eps-teal-50);
+  font-family: var(--eps-mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* ── nested groups ───────────────────────────────────────────────────────
+   Backbone repeats and inline-resolved references. Indented one level so a
+   reaction's manifestation is visibly PART of that reaction rather than a
+   sibling field of the allergy. */
+
+eps-patient-summary .eps-groups {
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--eps-border);
+}
+
+eps-patient-summary .eps-group-head {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--eps-text-muted);
+}
+
+eps-patient-summary .eps-groups .eps-resource {
+  margin: 6px 0;
+}
+
+eps-patient-summary .eps-groups .eps-dl {
+  padding-left: 0;
+}
+
+/* Visually distinct: these are fields the static EPS model does not name, so
+   the reader can tell "present in the document" from "described by the
+   profile" at a glance. */
+eps-patient-summary .eps-residual {
+  margin: 0 12px 10px;
+  padding: 6px 10px;
+  border: 1px dashed var(--eps-border-strong);
+  border-radius: var(--eps-radius-sm);
+}
+
+eps-patient-summary .eps-residual-head {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--eps-text-muted);
+}
+
+eps-patient-summary .eps-residual .eps-dl {
+  padding: 0;
+}
+
+eps-patient-summary .eps-orphans {
+  margin-top: 20px;
+}
+
+eps-patient-summary .section-unresolved {
+  margin: 0 0 12px;
+  padding-left: 34px;
+  font-size: 13px;
+  color: var(--eps-text-muted);
+}
+
+eps-patient-summary .section-unresolved .hint {
+  font-size: 11.5px;
+  font-style: italic;
+}
+
+eps-patient-summary .summary-raw {
+  margin-top: 8px;
+}
+
+eps-patient-summary .summary-raw pre {
+  max-height: 460px;
+  margin-top: 12px;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid var(--eps-border);
+  border-radius: var(--eps-radius-sm);
+  background: var(--eps-surface);
+  font-family: var(--eps-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
