@@ -29,9 +29,10 @@ import './views/composition-form';
 import './views/settings';
 import './views/patient-header';
 import './views/patient-summary';
+import './views/confirm-dialog';
 
 import { getHealth, type HealthStatus } from './openehr/client';
-import { getPatient } from './fhir/client';
+import { getPatient, deletePatient, getDeletionPreview } from './fhir/client';
 import type { PatientView } from './fhir/patient';
 
 export interface Route {
@@ -102,6 +103,12 @@ export class EpsApp extends LitElement {
   /** The patient named by the route, resolved once and passed down. */
   @state() private patient?: PatientView;
 
+  /** Set while the header's delete is being confirmed. */
+  @state() private confirmingDelete = false;
+  @state() private deleting = false;
+  @state() private deletePreview?: { compositions: number; bundles: number };
+  @state() private deleteError = '';
+
   private onHashChange = () => this.applyRoute();
 
   connectedCallback(): void {
@@ -121,7 +128,12 @@ export class EpsApp extends LitElement {
     try {
       this.health = await getHealth();
     } catch {
-      this.health = { ehrbase: 'unreachable', fhir: 'unreachable', templates: [] };
+      this.health = {
+        ehrbase: 'unreachable',
+        fhir: 'unreachable',
+        openfhir: 'unreachable',
+        templates: [],
+      };
     }
   }
 
@@ -146,6 +158,80 @@ export class EpsApp extends LitElement {
     } catch {
       this.patient = undefined;
     }
+  }
+
+  // --- deleting the patient in context ---------------------------------------
+
+  /**
+   * Opens the confirmation dialog for the header's delete button.
+   *
+   * The shell owns this rather than the header because the header is purely
+   * presentational, and because the shell is what holds the patient in context
+   * — it is the thing that has to stop holding them once they are gone.
+   */
+  private async onDeleteRequest(): Promise<void> {
+    const patient = this.patient;
+    if (!patient) return;
+
+    this.confirmingDelete = true;
+    this.deletePreview = undefined;
+    this.deleteError = '';
+
+    try {
+      const preview = await getDeletionPreview(patient.id);
+      if (this.confirmingDelete && this.patient?.id === patient.id) {
+        this.deletePreview = { compositions: preview.compositions, bundles: preview.bundles };
+      }
+    } catch {
+      // Descriptive only — the dialog falls back to general wording and the
+      // delete still reports exactly what it removed.
+    }
+  }
+
+  private cancelDelete(): void {
+    if (this.deleting) return;
+    this.confirmingDelete = false;
+    this.deletePreview = undefined;
+  }
+
+  /**
+   * Deletes the patient in context and leaves the patient-scoped views.
+   *
+   * Navigating away is not cosmetic: every view below this one is keyed on a
+   * patient id that no longer resolves, so staying would render a header and a
+   * composition list for someone who has just been removed.
+   */
+  private async confirmDelete(): Promise<void> {
+    const patient = this.patient;
+    if (!patient || this.deleting) return;
+
+    this.deleting = true;
+    this.deleteError = '';
+    try {
+      await deletePatient(patient.id);
+      this.confirmingDelete = false;
+      this.deletePreview = undefined;
+      this.patient = undefined;
+      navigate('#/patients');
+    } catch (err) {
+      // Kept open, so the failure is attached to the question that caused it.
+      this.deleteError = (err as Error).message;
+    } finally {
+      this.deleting = false;
+    }
+  }
+
+  /** See `eps-patients` for why the surviving EHR shell is not mentioned here. */
+  private deleteBody(): string {
+    const base = this.deletePreview
+      ? `This permanently removes the patient, their ${this.deletePreview.compositions} openEHR ` +
+        `composition${this.deletePreview.compositions === 1 ? '' : 's'}, and ` +
+        `${this.deletePreview.bundles} stored FHIR ` +
+        `bundle${this.deletePreview.bundles === 1 ? '' : 's'}. This cannot be undone.`
+      : 'This permanently removes the patient, their openEHR compositions and their stored ' +
+        'FHIR bundles. This cannot be undone.';
+
+    return this.deleteError ? `${base}\n\n${this.deleteError}` : base;
   }
 
   render() {
@@ -181,15 +267,33 @@ export class EpsApp extends LitElement {
             <span class="dot ${this.health?.fhir === 'up' ? 'up' : 'down'}"></span>
             FHIR ${this.health?.fhir ?? 'checking…'}
           </div>
+          <div class="conn">
+            <span class="dot ${this.health?.openfhir === 'up' ? 'up' : 'down'}"></span>
+            openFHIR ${this.health?.openfhir ?? 'checking…'}
+          </div>
         </div>
       </aside>
 
       <div class="main">
         ${this.patient && this.route.view !== 'patients'
-          ? html`<eps-patient-header .patient=${this.patient}></eps-patient-header>`
+          ? html`<eps-patient-header
+              .patient=${this.patient}
+              @patient-delete-request=${this.onDeleteRequest}
+            ></eps-patient-header>`
           : nothing}
         ${this.renderView()}
       </div>
+
+      <eps-confirm-dialog
+        .open=${this.confirmingDelete}
+        .heading=${this.patient ? `Delete ${this.patient.name}?` : ''}
+        .body=${this.deleteBody()}
+        .confirmLabel=${this.deleting ? 'Deleting…' : 'Delete patient'}
+        .destructive=${true}
+        .busy=${this.deleting}
+        @confirm-accept=${this.confirmDelete}
+        @confirm-cancel=${this.cancelDelete}
+      ></eps-confirm-dialog>
     `;
   }
 

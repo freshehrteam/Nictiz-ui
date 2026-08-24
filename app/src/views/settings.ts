@@ -79,7 +79,6 @@ export class EpsSettings extends LitElement {
         <div class="card">
           <div class="card-head">
             <h3>Connections</h3>
-            <button class="btn" @click=${this.refresh} data-testid="settings-refresh">Refresh</button>
           </div>
           <div class="card-body">
             <dl class="kv">
@@ -97,6 +96,17 @@ export class EpsSettings extends LitElement {
                   ${this.health?.fhir ?? 'checking…'}
                 </span>
                 ${this.health?.fhirBase ?? ''}
+              </dd>
+
+              <dt>openFHIR</dt>
+              <dd>
+                <span class="pill ${this.health?.openfhir === 'up' ? 'up' : 'down'}">
+                  ${this.health?.openfhir ?? 'checking…'}
+                </span>
+                ${this.health?.openfhirBase ?? ''}
+                ${this.health?.openfhirVersion
+                  ? html`<span class="muted">v${this.health.openfhirVersion}</span>`
+                  : nothing}
               </dd>
 
               <dt>Patients</dt>
@@ -150,7 +160,7 @@ export class EpsSettings extends LitElement {
           </div>
           <div class="card-body">
             <p style="margin-top:0">
-              Patients created by <code class="mono">npm run seed</code> are
+              The demo patients in this environment are
               <strong>fictional</strong>. They carry the FHIR tag
               <code class="mono">data-origin = demo</code> and use BSNs from the reserved
               <code class="mono">999…</code> test range, so none can collide with a real citizen

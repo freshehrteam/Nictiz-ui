@@ -348,6 +348,35 @@ eps-app .view {
   border-color: var(--eps-teal-700);
 }
 
+/* Destructive actions.
+   Outlined rather than filled: a delete button sits BESIDE the real action
+   almost everywhere it appears (next to "Change patient", on a patient card),
+   and a solid red block there reads as the primary thing to do. The solid
+   variant below is for the one place where destroying IS the primary action. */
+.btn.danger {
+  border-color: #e6b4b0;
+  background: var(--eps-surface);
+  color: var(--eps-danger);
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: var(--eps-danger-bg);
+  border-color: var(--eps-danger);
+}
+
+/* The confirm button of a destructive dialog — there, and only there, the
+   destructive action is what the user came to do. */
+.btn.primary.danger {
+  background: var(--eps-danger);
+  border-color: var(--eps-danger);
+  color: #fff;
+}
+
+.btn.primary.danger:hover:not(:disabled) {
+  background: #8f1e18;
+  border-color: #8f1e18;
+}
+
 .btn.large {
   padding: 10px 18px;
   font-size: 14px;

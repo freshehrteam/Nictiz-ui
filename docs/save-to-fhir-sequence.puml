@@ -1,0 +1,47 @@
+@startuml save-to-fhir-sequence
+!theme plain
+title Save a composition -> translate to FHIR -> display the Patient Summary
+
+skinparam responseMessageBelowArrow true
+
+actor Clinician as U
+participant "**openEHR UI**\ncomposition form" as FORM
+participant "**openEHR CDR**\nEHRbase" as EHR
+participant "**openFHIR**\nFHIR Connect" as OF
+participant "**FHIR server**\nHAPI" as HAPI
+participant "**FHIR UI**\npatient summary" as SUM
+
+U -> FORM: Save
+activate FORM
+
+FORM -> FORM: check mandatory fields\nagainst the template
+note right: A missing field is refused here.\nNothing is sent, and no pipeline is shown.
+
+FORM -> EHR: store the composition
+EHR --> FORM: committed (uid)
+note right of EHR: **The save is done at this point.**\nEverything below is translation —\nif it fails, the composition still stands.
+
+FORM -> EHR: read it back (canonical form)
+EHR --> FORM: composition
+note right of FORM: Canonical, because openFHIR maps\nfrom the full openEHR structure.
+
+FORM -> OF: translate this composition
+OF --> FORM: FHIR Bundle
+note right of OF: Needs the template registered\nin openFHIR, not just in the CDR.
+
+FORM -> HAPI: store the Bundle
+HAPI --> FORM: Bundle id
+
+U -> FORM: "View European Patient Summary"
+FORM -> SUM: open the summary,\npassing **only the Bundle id**
+deactivate FORM
+
+activate SUM
+SUM -> HAPI: fetch Bundle by id
+HAPI --> SUM: Bundle
+note right of SUM: Re-read rather than handed over,\nso reload and deep links work.
+
+SUM --> U: rendered over the EPS profile —\nsections the mapping omitted\nshow as "not present"
+deactivate SUM
+
+@enduml

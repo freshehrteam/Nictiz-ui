@@ -114,10 +114,18 @@ export async function toFhir(templateId: string, canonical: unknown): Promise<Fh
  * reload or a deep link re-reads the Bundle rather than depending on state
  * held in memory. The BFF strips the IPS Composition profile before storing —
  * see `stripInterceptedProfile` there for why that is not cosmetic.
+ *
+ * `patientId` is what makes the stored Bundle attributable. openFHIR emits no
+ * patient reference of its own — `Composition.subject` is null and there is no
+ * Patient resource — so without it the Bundle cannot later be found, and in
+ * particular cannot be removed when the patient is deleted. It is optional so
+ * that the endpoint stays backward-compatible; see `identifyBundleWithPatient`
+ * in the BFF for what it costs.
  */
-export async function storeBundle(bundle: FhirBundle): Promise<string> {
+export async function storeBundle(bundle: FhirBundle, patientId?: string): Promise<string> {
+  const query = patientId ? `?patientId=${encodeURIComponent(patientId)}` : '';
   const stored = await json<FhirBundle>(
-    await fetch('/api/fhir/Bundle', {
+    await fetch(`/api/fhir/Bundle${query}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(bundle),

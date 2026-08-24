@@ -175,6 +175,9 @@ credential, so `composer` starts recording real clinicians with no code change.
 
 ## Architecture
 
+Sequence and component diagrams for the save → FHIR translation → display flow
+live in [`docs/`](docs/) as PlantUML sources.
+
 ```
 app/
   src/
@@ -372,6 +375,60 @@ created without it are orphans — valid, but unreachable from any patient. This
 CDR holds 41 such EHRs left by the evaluation PoC; they are deliberately left
 alone rather than given invented demographics.
 
+### Deleting a patient
+
+The delete button on a patient card (and in the patient header) removes the FHIR
+Patient, their openEHR compositions and their stored FHIR Bundles, in that
+order — patient **last**, so a failure part-way leaves a state the user can
+still find and retry.
+
+It is deliberately **not transactional**. Nothing spans EHRbase and HAPI, so
+`DELETE /api/patients/:id` always answers with a report of what it actually
+removed rather than pretending a rollback happened:
+
+```jsonc
+{ "patientId": "42", "ehrId": "…",
+  "compositions": { "found": 2, "deleted": 2, "failed": [] },
+  "bundles":      { "found": 1, "deleted": 1, "failed": [] },
+  "patient":      { "deleted": true } }
+```
+
+A partial failure is a `200` with a populated `failed[]`, not an error — read
+that array rather than treating a resolved call as total success.
+`GET /api/patients/:id/deletion-preview` returns the same counts up front, and
+is what lets the confirmation dialog name real numbers.
+
+**Bundles are found by `Bundle.identifier`.** openFHIR emits no patient
+reference at all — `Composition.subject` is null and no Patient resource is
+included — so the BFF stamps the patient id onto the Bundle as it is stored
+(`?patientId=` on `POST /api/fhir/Bundle`). That **overwrites openFHIR's
+per-document UUID**, which is a real loss of document identity, accepted because
+nothing in this app reads that UUID and an unattributable Bundle cannot be
+cleaned up at all.
+
+Three things this does **not** do, none of them surfaced in the UI:
+
+- **The openEHR EHR shell survives.** `DELETE /ehr/{id}` is `405` on this CDR and
+  the admin API is `403` with the BFF's credentials. What is left is an empty
+  EHR, but it is left.
+- **Composition deletion is logical.** openEHR appends a deleted version; the CDR
+  retains the full version history.
+- **Pre-existing Bundles are untouched.** Bundles stored before this linkage
+  existed — 38 of them on the demo stack — carry no patient identifier and are
+  unattributable. Clear them wholesale with HAPI's `$expunge` if demo data needs
+  a reset.
+
+Two things about this stack that its own CapabilityStatement gets wrong, both
+found by probing it and both worked around in the BFF:
+
+- HAPI advertises `conditionalDelete: multiple` on Bundle, but refuses a
+  conditional delete matching more than one resource with
+  `412 HAPI-0962`. Bundles are therefore resolved to ids and deleted one by one.
+- `_summary=count` serves a **cached** count that survives a delete, and
+  `_elements=id` returns a SUBSETTED searchset with no `entry` array at all.
+  Both are why those queries carry `Cache-Control: no-cache` and why the id
+  search reads full resources.
+
 ---
 
 ## Known limitations
@@ -388,3 +445,6 @@ alone rather than given invented demographics.
   replaces it without touching form code.
 - **Medblocks is on Lit 1 with one maintainer.** Accepted with open eyes; the
   custom renderer spiked in the evaluation remains the planned successor.
+- **Deleting a patient leaves the EHR shell behind**, deletes compositions only
+  logically, and cannot reach Bundles stored before the patient link existed.
+  See [Deleting a patient](#deleting-a-patient).

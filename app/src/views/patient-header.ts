@@ -18,6 +18,12 @@ export class EpsPatientHeader extends LitElement {
 
   @property({ attribute: false }) patient?: PatientView;
 
+  private requestDelete(): void {
+    this.dispatchEvent(
+      new CustomEvent('patient-delete-request', { bubbles: true, composed: true }),
+    );
+  }
+
   render() {
     const p = this.patient;
     if (!p) return nothing;
@@ -40,6 +46,19 @@ export class EpsPatientHeader extends LitElement {
 
         <button class="btn" @click=${() => navigate('#/patients')} data-testid="change-patient">
           Change patient
+        </button>
+
+        <!-- Emits rather than deletes. This header is purely presentational —
+             it holds no data-layer dependency beyond navigate() — and the
+             confirmation dialog belongs with whoever owns the patient list it
+             has to refresh afterwards. -->
+        <button
+          class="btn danger"
+          @click=${this.requestDelete}
+          aria-label="Delete ${p.name}"
+          data-testid="header-delete-patient"
+        >
+          Delete
         </button>
       </div>
     `;

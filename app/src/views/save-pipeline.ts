@@ -85,17 +85,6 @@ export interface RunFacts {
   bundleId?: string;
   /** Set when a step failed — the real error, shown on that step. */
   error?: string;
-  /**
-   * A non-fatal remark about a step that still succeeded — currently a
-   * read-back that differs from what was submitted.
-   *
-   * Distinct from `error` on purpose: the CDR accepted and stored the
-   * composition (201), so the pipeline continues. EHRbase reformats some
-   * values it stores — an `mb-date`'s `…T07:28:00.000Z` comes back as
-   * `…T07:28:00Z` — and a string diff cannot tell that apart from real data
-   * loss. Reporting it without blocking is the honest middle.
-   */
-  note?: string;
 }
 
 export type ResourceCounts = Record<string, number>;

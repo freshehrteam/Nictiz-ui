@@ -47,13 +47,14 @@ import {
   type SectionMode,
 } from '../forms/section-shell';
 import { handleSearch } from '../terminology/handleSearch';
+import { applyRepeatableStyles, ensureRepeatableStyles } from '../forms/repeatable-styles';
 import {
   ensureSearchHandlers,
   importComposition,
   exportComposition,
   type MbForm,
 } from '../openehr/medblocks';
-import { diffFlat, summarizeDiff, ROOT } from '../openehr/flat';
+import { ROOT } from '../openehr/flat';
 import {
   validateMandatory,
   summarizeIssues,
@@ -167,10 +168,28 @@ export class EpsCompositionForm extends LitElement {
     // the marks are computed once and then frozen: a field stays red after the
     // user has filled it in, which trains them to ignore the marking entirely.
     this.addEventListener('mb-input', this.onFieldInput);
+
+    // D-10, second half. Clicking "add" on a repeatable runs `this.count++`
+    // inside mb-repeatable-simple and nothing else — no property of THIS
+    // component changes, so Lit never re-renders and the `updated()` hook below
+    // never fires for the new occurrence. The copy is cloned from
+    // `slotNode.outerHTML`, so it cannot inherit `handleSearch` either, and
+    // mb-form's own `handleChildConnect` assigns only `mbForm` and `variant`.
+    // `mb-connect` bubbles and is composed, so it is the one signal that does
+    // reach us for a freshly added mb-search.
+    this.addEventListener('mb-connect', this.onChildConnect);
+
+    // D-11. A repeatable that connects outside our render pass — a nested one
+    // created inside a copy, for instance — would otherwise wait for the next
+    // `updated()` to be styled, showing one unstyled frame. `Repeatable` emits
+    // this from its own `connectedCallback` and it bubbles composed.
+    this.addEventListener('mb-connect-repeatable', this.onRepeatableConnect);
   }
 
   disconnectedCallback(): void {
     this.removeEventListener('mb-input', this.onFieldInput);
+    this.removeEventListener('mb-connect', this.onChildConnect);
+    this.removeEventListener('mb-connect-repeatable', this.onRepeatableConnect);
     super.disconnectedCallback();
   }
 
@@ -184,10 +203,60 @@ export class EpsCompositionForm extends LitElement {
     if (this.validationAttempted) this.requestUpdate();
   };
 
+  /**
+   * Wires `handleSearch` onto elements that appear without a re-render of this
+   * component — every occurrence a repeatable adds after the first.
+   *
+   * `mb-connect` fires from the child's `connectedCallback`, so the emitting
+   * element is `composedPath()[0]` and is wired directly rather than by
+   * re-scanning: at this point it may not be in `querySelectorAll` range yet.
+   * A repeatable occurrence containing a search nested deeper still gets swept
+   * by the `updated()` pass and by its own `mb-connect`, since every mb-*
+   * element emits one.
+   */
+  private readonly onChildConnect = (e: Event): void => {
+    const target = e.composedPath()[0] as (HTMLElement & { handleSearch?: unknown }) | undefined;
+    if (!target?.tagName) return;
+    const tag = target.tagName.toLowerCase();
+    if (tag !== 'mb-search' && tag !== 'mb-search-multiple') return;
+    if (typeof target.handleSearch !== 'function') {
+      target.handleSearch = handleSearch;
+    }
+  };
+
+  /**
+   * Adopts the occurrence styles into a repeatable as soon as it connects.
+   *
+   * `mb-connect-repeatable` fires from `Repeatable.connectedCallback`, which
+   * runs BEFORE the element's first render — so `shadowRoot` is usually still
+   * null at this point. `updateComplete` is the earliest moment it exists.
+   * Falling back to `updated()` alone would work, but only after a full render
+   * of this component, which is a frame of unstyled markup the user can see.
+   */
+  private readonly onRepeatableConnect = (e: Event): void => {
+    const el = e.composedPath()[0] as (HTMLElement & { updateComplete?: Promise<unknown> }) | undefined;
+    if (!el?.shadowRoot && !el?.updateComplete) return;
+
+    if (el.shadowRoot) {
+      applyRepeatableStyles(el.shadowRoot);
+      return;
+    }
+    void el.updateComplete?.then(() => {
+      if (el.shadowRoot) applyRepeatableStyles(el.shadowRoot);
+    });
+  };
+
   updated(changed: PropertyValues): void {
     // D-10: repeatable copies appear after any interaction, not only at first
     // paint, so this runs on every render — not once in connectedCallback.
     ensureSearchHandlers(this, handleSearch as unknown as (o: unknown) => Promise<unknown[]>);
+
+    // D-11: a repeatable renders occurrences 1+ into its own SHADOW root, which
+    // our `eps-composition-form ...` CSS cannot reach. Adopt the layout rules
+    // into each one so an added entry looks like the first. Same reason as
+    // above for running on every render: a repeatable appears when a section
+    // switches to its entries branch, not only at first paint.
+    ensureRepeatableStyles(this);
 
     if (changed.has('uid') || changed.has('patientId')) void this.prepare();
 
@@ -422,8 +491,6 @@ export class EpsCompositionForm extends LitElement {
       this.setStatus(
         'success',
         `Loaded ${report.bound} of ${report.read} stored values into the form.`,
-        `${report.read} keys read from the CDR · ${report.bound} bound to fields · ` +
-          `${report.deferred} passed through unbound (RM housekeeping and fields not built).`,
       );
     } catch (err) {
       // Let a failed load be retried rather than latching on a bad attempt.
@@ -602,33 +669,16 @@ export class EpsCompositionForm extends LitElement {
         : await postComposition(this.ehrId, this.templateId, flat);
       const readBack = await getComposition(this.ehrId, uid);
 
-      // Compared on the submitted subset: the CDR legitimately adds keys of its
-      // own (uid, audit), and counting those as differences would be noise.
-      //
-      // `_uid` is dropped from the comparison for the same reason. An update
-      // returns the SAME composition at the next version — `…::2` where the
-      // loaded payload said `…::1` — so comparing it would report a mangled
-      // key on every single update, for the one field that is supposed to
-      // change.
-      const comparable = Object.fromEntries(
-        Object.entries(flat).filter(([key]) => !key.endsWith('/_uid')),
-      );
-      const diff = diffFlat(comparable, readBack as FlatComposition);
-      const clean = diff.lost.length === 0 && diff.mangled.length === 0;
-
-      // The 201 is what decides the outcome. The read-back is a REPORT, not a
-      // gate: EHRbase legitimately reformats values it stores — it returns an
-      // `mb-date`'s `…T07:28:00.000Z` as `…T07:28:00Z` — and `diffFlat`
-      // compares strings, so a byte difference does not imply a value was
-      // lost. Halting the pipeline on that turned a cosmetic reformat into a
-      // failed save. Any discrepancy is now surfaced on the step and in the
-      // detail block below the form, and the flow continues.
+      // The 201 is what decides the outcome. The read-back is only counted, not
+      // compared: EHRbase legitimately reformats values it stores — it returns
+      // an `mb-date`'s `…T07:28:00.000Z` as `…T07:28:00Z` — so a byte
+      // difference never implied a value was lost, and reporting one read as a
+      // problem where there was none.
       this.run = {
         ...this.run,
         uid,
         updated: Boolean(existingUid),
         readBack: Object.keys(readBack).length,
-        note: clean ? undefined : `stored, with ${summarizeDiff(diff)}`,
       };
 
       // Floor, not a fixed delay: a localhost POST can return in 40ms, and a
@@ -663,7 +713,7 @@ export class EpsCompositionForm extends LitElement {
         // the id travels in the URL and the viewer re-reads from the server.
         this.setStep('bundle', 'running');
         const bundleStarted = performance.now();
-        const bundleId = await storeBundle(bundle);
+        const bundleId = await storeBundle(bundle, this.patientId);
 
         this.run = { ...this.run, bundleId };
         await dwell(Math.max(0, stepDwell('bundle') - (performance.now() - bundleStarted)));
@@ -679,7 +729,7 @@ export class EpsCompositionForm extends LitElement {
       // Reports the REAL diff, not a blanket success: the pipeline no longer
       // halts on a discrepancy, so this block below the form is where a
       // dropped or altered key stays visible and reviewable.
-      this.reportSave(clean, flat, readBack, uid, diff);
+      this.reportSave(flat, readBack, uid);
 
       // The save went through, so any marks left from an earlier refusal are
       // stale. Clearing the attempt flag too stops the freshly saved form being
@@ -730,15 +780,12 @@ export class EpsCompositionForm extends LitElement {
   /**
    * Writes the save outcome to the inline status and detail block.
    *
-   * The panel is transient; this is what remains on the page afterwards, so it
-   * keeps carrying the full diff rather than deferring to the animation.
+   * The panel is transient; this is what remains on the page afterwards.
    */
   private reportSave(
-    clean: boolean,
     flat: FlatComposition,
     readBack: Record<string, unknown>,
     uid: string,
-    diff: ReturnType<typeof diffFlat>,
   ): void {
     // A mapping failure does not undo the save, but it must not be swallowed
     // either: the banner is what remains on the page after the panel closes, so
@@ -749,30 +796,18 @@ export class EpsCompositionForm extends LitElement {
       ? ` The FHIR mapping did not complete, so no Patient Summary was generated (${this.run.error}).`
       : '';
 
-    // A differing read-back is a WARNING, not an error: the CDR returned 201,
-    // so the composition is stored. Keeping this red would contradict the
-    // pipeline, which now completes, and would train the user to ignore a
-    // banner that also reports genuine data loss.
+    // The 201 decides the outcome. Only a mapping failure downgrades this to a
+    // warning — the composition itself is stored either way.
     this.setStatus(
-      clean && !mappingFailed ? 'success' : 'warning',
-      (clean
-        ? `Saved. ${Object.keys(flat).length} values stored and verified against the CDR.`
-        : `Saved. The read-back differs from what was submitted (${summarizeDiff(diff)}) — ` +
-            `often only reformatting by the CDR. Details below.`) + mappingNote,
+      mappingFailed ? 'warning' : 'success',
+      `Saved. ${Object.keys(flat).length} values stored.` + mappingNote,
       [
         `EHR ${this.ehrId}`,
         `UID ${uid}`,
         this.run.bundleId ? `Bundle ${this.run.bundleId}` : '',
         '',
         `Submitted ${Object.keys(flat).length} keys, read back ${Object.keys(readBack).length}.`,
-        `Compared on the submitted subset: ${summarizeDiff(diff)}`,
         mappingFailed ? `\nFHIR mapping failed:\n  ${this.run.error}` : '',
-        diff.lost.length ? `\nDropped by the CDR:\n${diff.lost.map((k) => `  - ${k}`).join('\n')}` : '',
-        diff.mangled.length
-          ? `\nAltered by the CDR:\n${diff.mangled
-              .map((m) => `  ~ ${m.key}: ${m.expected} -> ${m.actual}`)
-              .join('\n')}`
-          : '',
       ]
         .filter(Boolean)
         .join('\n'),

@@ -71,3 +71,61 @@ export async function getPatientEhr(id: string): Promise<string | null> {
   const body = await json<{ ehrId: string | null }>(res, 'EHR lookup');
   return body.ehrId ?? null;
 }
+
+/** One thing the delete could not remove, named so the report can say which. */
+export interface DeleteFailure {
+  uid?: string;
+  id?: string;
+  status: number;
+  detail?: string;
+}
+
+/**
+ * What a patient deletion actually did.
+ *
+ * A report rather than a boolean, because the delete spans two servers with no
+ * transaction between them: a run that removed the compositions but not the
+ * Bundles is a real outcome that has to be describable. `found` and `deleted`
+ * are counted separately so a partial run is visible rather than rounded off.
+ */
+export interface DeleteResult {
+  patientId: string;
+  ehrId: string | null;
+  compositions: { found: number; deleted: number; failed: DeleteFailure[] };
+  bundles: { found: number; deleted: number; failed: DeleteFailure[] };
+  patient: { deleted: boolean };
+}
+
+/** What deleting a patient would remove, for the confirmation dialog. */
+export interface DeletionPreview {
+  patientId: string;
+  ehrId: string | null;
+  compositions: number;
+  bundles: number;
+}
+
+export async function getDeletionPreview(id: string): Promise<DeletionPreview> {
+  return json<DeletionPreview>(
+    await fetch(`/api/patients/${encodeURIComponent(id)}/deletion-preview`),
+    'deletion preview',
+  );
+}
+
+/**
+ * Deletes a patient, their openEHR compositions and their stored FHIR Bundles.
+ *
+ * Note what does NOT happen: the openEHR EHR shell survives. This CDR answers
+ * 405 to `DELETE /ehr/{id}` and its admin API is 403 with the BFF's
+ * credentials, so an empty EHR is left behind. Composition deletion is also
+ * logical — the CDR retains version history. Neither is worth surfacing in the
+ * UI, but both are why this is not the clean erasure the wording implies.
+ *
+ * A 200 can still carry failures: see `DeleteResult`. Callers that care should
+ * read `failed[]` rather than treating a resolved promise as total success.
+ */
+export async function deletePatient(id: string): Promise<DeleteResult> {
+  return json<DeleteResult>(
+    await fetch(`/api/patients/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    'patient deletion',
+  );
+}

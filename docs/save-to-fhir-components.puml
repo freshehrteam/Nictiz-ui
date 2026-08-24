@@ -1,0 +1,41 @@
+@startuml save-to-fhir-components
+!theme plain
+title Components and how a composition becomes a displayed Patient Summary
+
+skinparam componentStyle rectangle
+skinparam ranksep 70
+skinparam nodesep 45
+
+package "nictiz-ui" {
+  component "**openEHR UI**\ncomposition form" as FORM
+  component "**FHIR UI**\npatient summary viewer" as SUM
+  FORM ..> SUM : **5.** hand over\nthe Bundle id
+}
+
+database "**openEHR CDR**\nEHRbase" as EHR
+component "**openFHIR**\nFHIR Connect\nmapping engine" as OF
+database "**FHIR server**\nHAPI" as HAPI
+
+FORM --> EHR  : **1.** store composition\n**2.** read back (canonical)
+FORM --> OF   : **3.** translate to FHIR
+FORM --> HAPI : **4.** store Bundle
+SUM  --> HAPI : **6.** fetch Bundle by id
+
+OF ..> EHR : reads the\ntemplate (OPT)
+
+note as N1
+  Both UIs reach the three services through a thin
+  backend-for-frontend: nothing in the stack allows
+  CORS, and the CDR credential must not reach the browser.
+end note
+
+note as N2
+  Steps 3-6 are **non-fatal**. The composition is already
+  committed by then, so a failed translation leaves the
+  record intact — only the summary is unavailable.
+end note
+
+FORM .. N1
+OF .. N2
+
+@enduml

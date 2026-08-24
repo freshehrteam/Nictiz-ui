@@ -7,9 +7,16 @@
 
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { searchPatients, createPatient } from '../fhir/client';
+import {
+  searchPatients,
+  createPatient,
+  deletePatient,
+  getDeletionPreview,
+  type DeleteResult,
+} from '../fhir/client';
 import { validateDraft, type PatientDraft, type PatientView } from '../fhir/patient';
 import { navigate } from '../shell';
+import './confirm-dialog';
 
 /** Search debounce — long enough not to query on every keystroke. */
 const SEARCH_DEBOUNCE_MS = 250;
@@ -40,6 +47,12 @@ export class EpsPatients extends LitElement {
   @state() private draftErrors: Record<string, string> = {};
   @state() private saving = false;
   @state() private created = '';
+
+  /** The patient the confirmation dialog is currently asking about. */
+  @state() private pendingDelete?: PatientView;
+  @state() private deleting = false;
+  /** Counts for the dialog copy, once the preview has come back. */
+  @state() private preview?: { compositions: number; bundles: number };
 
   private debounce?: ReturnType<typeof setTimeout>;
 
@@ -132,6 +145,104 @@ export class EpsPatients extends LitElement {
     }
   }
 
+  // --- deleting a patient ---------------------------------------------------
+
+  /**
+   * Opens the confirmation dialog, then fills in what deletion would cost.
+   *
+   * The dialog opens IMMEDIATELY and the preview lands after it — the counts
+   * are worth naming but not worth a spinner between the click and the
+   * question. Until they arrive the copy stays deliberately general rather than
+   * showing zeroes, which would read as "there is nothing here to lose".
+   */
+  private async requestDelete(patient: PatientView): Promise<void> {
+    this.pendingDelete = patient;
+    this.preview = undefined;
+
+    try {
+      const preview = await getDeletionPreview(patient.id);
+      // Guard against a slow preview for a patient the user has since dismissed
+      // or swapped — otherwise it would repopulate a closed dialog's counts.
+      if (this.pendingDelete?.id === patient.id) {
+        this.preview = { compositions: preview.compositions, bundles: preview.bundles };
+      }
+    } catch {
+      // A failed preview is not worth blocking the delete over: the counts are
+      // descriptive, and the delete reports what it actually removed anyway.
+    }
+  }
+
+  private cancelDelete(): void {
+    if (this.deleting) return;
+    this.pendingDelete = undefined;
+    this.preview = undefined;
+  }
+
+  /**
+   * Performs the delete and reports what it actually removed.
+   *
+   * The banner is built from the RESPONSE, never from the preview: the two are
+   * usually equal, but the delete is non-transactional across EHRbase and HAPI,
+   * so what was removed is the only honest thing to claim. A partial failure
+   * says so instead of quietly reporting success.
+   */
+  private async confirmDelete(): Promise<void> {
+    const patient = this.pendingDelete;
+    if (!patient || this.deleting) return;
+
+    this.deleting = true;
+    this.error = '';
+    try {
+      const result = await deletePatient(patient.id);
+
+      this.created = this.summarise(patient, result);
+      this.pendingDelete = undefined;
+      this.preview = undefined;
+      await this.search();
+    } catch (err) {
+      this.error = (err as Error).message;
+      // The dialog stays open on failure: closing it would leave the error
+      // banner above a list that still shows the patient, with no way to tell
+      // whether anything happened.
+    } finally {
+      this.deleting = false;
+    }
+  }
+
+  /** Turns a delete report into one line of plain English. */
+  private summarise(patient: PatientView, result: DeleteResult): string {
+    const failures = result.compositions.failed.length + result.bundles.failed.length;
+    const removed =
+      `${result.compositions.deleted} composition${result.compositions.deleted === 1 ? '' : 's'} ` +
+      `and ${result.bundles.deleted} bundle${result.bundles.deleted === 1 ? '' : 's'}`;
+
+    return failures
+      ? `Deleted ${patient.name} and ${removed}, but ${failures} item${failures === 1 ? '' : 's'} ` +
+        `could not be removed.`
+      : `Deleted ${patient.name} — ${removed} removed.`;
+  }
+
+  /**
+   * The dialog's body copy.
+   *
+   * The surviving EHR shell is deliberately NOT mentioned: it is an artefact of
+   * this CDR refusing `DELETE /ehr/{id}`, it holds nothing once the
+   * compositions are gone, and naming it here would trade a clear decision for
+   * a technical caveat the reader cannot act on. It is documented in the README.
+   */
+  private deleteBody(): string {
+    if (!this.preview) {
+      return 'This permanently removes the patient, their openEHR compositions and their ' +
+        'stored FHIR bundles. This cannot be undone.';
+    }
+    const { compositions, bundles } = this.preview;
+    return (
+      `This permanently removes the patient, their ${compositions} openEHR ` +
+      `composition${compositions === 1 ? '' : 's'}, and ${bundles} stored FHIR ` +
+      `bundle${bundles === 1 ? '' : 's'}. This cannot be undone.`
+    );
+  }
+
   render() {
     return html`
       <div class="view-head">
@@ -166,6 +277,17 @@ export class EpsPatients extends LitElement {
       ${this.error ? html`<div class="message error">${this.error}</div>` : nothing}
       ${this.creating ? this.renderForm() : nothing}
       ${this.renderList()}
+
+      <eps-confirm-dialog
+        .open=${Boolean(this.pendingDelete)}
+        .heading=${this.pendingDelete ? `Delete ${this.pendingDelete.name}?` : ''}
+        .body=${this.deleteBody()}
+        .confirmLabel=${this.deleting ? 'Deleting…' : 'Delete patient'}
+        .destructive=${true}
+        .busy=${this.deleting}
+        @confirm-accept=${this.confirmDelete}
+        @confirm-cancel=${this.cancelDelete}
+      ></eps-confirm-dialog>
     `;
   }
 
@@ -262,7 +384,7 @@ export class EpsPatients extends LitElement {
         <div class="empty">
           ${this.query
             ? html`No patients match “${this.query}”.`
-            : html`No patients yet. Run <code class="mono">npm run seed</code> to create the demo set.`}
+            : html`No patients yet. Ask your administrator to load the demo patient set.`}
         </div>
       </div>`;
     }
@@ -271,22 +393,38 @@ export class EpsPatients extends LitElement {
       <div class="patient-grid" data-testid="patient-list">
         ${this.patients.map(
           (p) => html`
-            <button
-              class="patient-card"
-              @click=${() => navigate(`#/patients/${encodeURIComponent(p.id)}/compositions`)}
-              data-testid="patient-${p.id}"
-            >
-              <span class="avatar" aria-hidden="true">${p.initials}</span>
-              <span>
-                <span class="name">${p.name}</span><br />
-                <span class="meta">
-                  ${p.age != null ? `${p.age} y` : 'age unknown'} ·
-                  ${p.sex ?? 'unknown'} ·
-                  ${p.birthDate ?? 'no DOB'}
+            <div class="patient-cell">
+              <button
+                class="patient-card"
+                @click=${() => navigate(`#/patients/${encodeURIComponent(p.id)}/compositions`)}
+                data-testid="patient-${p.id}"
+              >
+                <span class="avatar" aria-hidden="true">${p.initials}</span>
+                <span>
+                  <span class="name">${p.name}</span><br />
+                  <span class="meta">
+                    ${p.age != null ? `${p.age} y` : 'age unknown'} ·
+                    ${p.sex ?? 'unknown'} ·
+                    ${p.birthDate ?? 'no DOB'}
+                  </span>
+                  ${p.identifier ? html`<br /><span class="bsn">BSN ${p.identifier}</span>` : nothing}
                 </span>
-                ${p.identifier ? html`<br /><span class="bsn">BSN ${p.identifier}</span>` : nothing}
-              </span>
-            </button>
+              </button>
+
+              <!-- A SIBLING of the card, not a child: the card is itself a
+                   button, and nesting one inside it is invalid HTML that the
+                   parser unnests. Being outside also means no stopPropagation
+                   is needed to keep the click off the card's navigation. -->
+              <button
+                class="btn danger card-delete"
+                @click=${() => void this.requestDelete(p)}
+                aria-label="Delete ${p.name}"
+                title="Delete ${p.name}"
+                data-testid="delete-patient-${p.id}"
+              >
+                <span aria-hidden="true">🗑</span>
+              </button>
+            </div>
           `,
         )}
       </div>

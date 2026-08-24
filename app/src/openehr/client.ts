@@ -8,11 +8,16 @@ export type FlatComposition = Record<string, unknown>;
 export interface HealthStatus {
   ehrbase: string;
   fhir: string;
+  openfhir: string;
   templates: string[];
   ehrbaseBase?: string;
   fhirBase?: string;
+  openfhirBase?: string;
   ehrbaseDetail?: string;
   fhirDetail?: string;
+  openfhirDetail?: string;
+  /** Engine version reported by openFHIR's `/status`, when reachable. */
+  openfhirVersion?: string;
 }
 
 export interface Stats {

@@ -39,11 +39,12 @@ export class EpsDashboard extends LitElement {
   render() {
     const ehrbaseUp = this.health?.ehrbase === 'up';
     const fhirUp = this.health?.fhir === 'up';
+    const openfhirUp = this.health?.openfhir === 'up';
 
     return html`
       <div class="view-head">
         <h2>Dashboard</h2>
-        <p>Connection state and record counts across both back ends.</p>
+        <p>Connection state and record counts across the back ends.</p>
       </div>
 
       ${this.error ? html`<div class="message error">${this.error}</div>` : nothing}
@@ -74,6 +75,12 @@ export class EpsDashboard extends LitElement {
               </span>
               <span class="mono muted">${this.health?.fhirBase ?? ''}</span>
             </div>
+            <div class="template-row">
+              <span class="pill ${openfhirUp ? 'up' : 'down'}">
+                openFHIR ${this.health?.openfhir ?? 'checking…'}
+              </span>
+              <span class="mono muted">${this.health?.openfhirBase ?? ''}</span>
+            </div>
           </div>
         </div>
 
@@ -88,7 +95,7 @@ export class EpsDashboard extends LitElement {
             </button>
             ${this.stats?.patients === 0
               ? html`<div class="message info" style="margin-top:14px">
-                  No patients yet. Run <code class="mono">npm run seed</code> to create the demo set.
+                  No patients yet. Ask your administrator to load the demo patient set.
                 </div>`
               : nothing}
           </div>

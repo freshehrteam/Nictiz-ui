@@ -52,11 +52,17 @@ async function formReady(page: Page): Promise<void> {
 }
 
 test.describe('shell and navigation', () => {
-  test('@stack dashboard reports both back ends and non-zero counts', async ({ page }) => {
+  test('@stack dashboard reports every back end and non-zero counts', async ({ page }) => {
     await page.goto('/#/dashboard');
 
     await expect(page.locator('.pill', { hasText: 'EHRbase up' })).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('.pill', { hasText: 'FHIR up' })).toBeVisible();
+    await expect(page.locator('.pill', { hasText: 'openFHIR up' })).toBeVisible();
+
+    // All three, by exact text. `hasText: 'FHIR up'` alone is a substring match
+    // that the openFHIR pill also satisfies, so HAPI's row could vanish and the
+    // assertion would still pass. toHaveText normalises the template's newline
+    // padding, which an anchored /^FHIR up$/ regex would not.
+    await expect(page.locator('.pill')).toHaveText(['EHRbase up', 'FHIR up', 'openFHIR up']);
 
     // Counts render as soon as /api/stats answers.
     const patients = page.locator('.tile', { hasText: 'Patients (FHIR)' }).locator('.value');
@@ -814,5 +820,177 @@ test.describe('updating an existing composition', () => {
     const objectId = uid.split('::')[0];
     await page.locator('[data-testid=pipeline-cta]').click();
     await expect(page).toHaveURL(new RegExp(`${objectId}%3A%3A[^/]*%3A%3A\\d+`), { timeout: 15_000 });
+  });
+});
+
+/**
+ * Deleting a patient, and the guard in front of it.
+ *
+ * The @stack test is SELF-CLEANING: it creates its own patient and deletes only
+ * that one. Deleting a seeded patient would be a slow-motion disaster for this
+ * suite — most tests here open "the first patient", so removing one silently
+ * changes what every other test is measuring.
+ */
+test.describe('deleting a patient', () => {
+  test('the confirm dialog is dismissible and never opens focused on the destructive action', async ({
+    page,
+  }) => {
+    await page.goto('/#/patients');
+    const cards = page.locator('.patient-card');
+    await expect(cards.first()).toBeVisible({ timeout: 15_000 });
+
+    // The first card's delete button, whoever that patient happens to be. This
+    // test never confirms, so it cannot delete anything.
+    await page.locator('[data-testid^=delete-patient-]').first().click();
+    await expect(page.locator('[data-testid=confirm-dialog]')).toBeVisible();
+
+    // Focus lands on Cancel, so a stray Enter cannot complete the delete.
+    await expect(page.locator('[data-testid=confirm-cancel]')).toBeFocused();
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-testid=confirm-dialog]')).toHaveCount(0);
+
+    // A click on the backdrop dismisses; a click on the card must not.
+    await page.locator('[data-testid^=delete-patient-]').first().click();
+    await expect(page.locator('[data-testid=confirm-dialog]')).toBeVisible();
+    await page.locator('[data-testid=confirm-dialog]').click({ position: { x: 5, y: 5 } });
+    await expect(page.locator('[data-testid=confirm-dialog]')).toBeVisible();
+
+    await page.locator('[data-testid=confirm-backdrop]').click({ position: { x: 5, y: 5 } });
+    await expect(page.locator('[data-testid=confirm-dialog]')).toHaveCount(0);
+  });
+
+  test('@stack deletes the patient it created, with its compositions and bundles', async ({
+    page,
+  }) => {
+    // --- create a patient of this test's own ---
+    const surname = `Deleteme${Date.now()}`;
+    await page.goto('/#/patients');
+    await expect(page.locator('.patient-card').first()).toBeVisible({ timeout: 15_000 });
+
+    await page.locator('[data-testid=new-patient]').click();
+    await page.locator('[data-testid=np-firstName]').fill('Wegwerp');
+    await page.locator('[data-testid=np-lastName]').fill(surname);
+    await page.locator('[data-testid=np-birthDate]').fill('1970-01-01');
+    await page.locator('[data-testid=np-save]').click();
+
+    await expect(page).toHaveURL(/#\/patients\/[^/]+\/compositions/, { timeout: 20_000 });
+    const patientId = page.url().match(/#\/patients\/([^/]+)\//)?.[1] ?? '';
+    expect(patientId).toBeTruthy();
+
+    // --- give them a composition and a linked Bundle ---
+    //
+    // Through the client modules rather than the form UI: this test is about
+    // the delete cascade, and driving the whole save pipeline here would make a
+    // failure in the form look like a failure in the delete.
+    const seeded = await page.evaluate(
+      async ([id, templateId]) => {
+        const fhir = await import('/src/fhir/client.ts');
+        const openehr = await import('/src/openehr/client.ts');
+        const bundleMod = await import('/src/fhir/bundle.ts');
+
+        const ehrId = await fhir.getPatientEhr(id);
+        const flat = await openehr.getGoldenFixture();
+        const { uid } = await openehr.postComposition(ehrId!, templateId, flat);
+
+        const canonical = await openehr.getCompositionCanonical(ehrId!, uid);
+        const bundle = await bundleMod.toFhir(templateId, canonical);
+        // The patient id is what makes the Bundle findable by the delete.
+        await bundleMod.storeBundle(bundle, id);
+
+        return { ehrId };
+      },
+      [patientId, TEMPLATE],
+    );
+    expect(seeded.ehrId).toBeTruthy();
+
+    // The preview must SEE them, or the delete has nothing to prove.
+    const preview = await page.evaluate(async (id) => {
+      const fhir = await import('/src/fhir/client.ts');
+      return fhir.getDeletionPreview(id);
+    }, patientId);
+    expect(preview.compositions).toBeGreaterThan(0);
+    expect(preview.bundles).toBeGreaterThan(0);
+
+    // --- cancel must not delete ---
+    await page.goto('/#/patients');
+    await page.locator('[data-testid=patient-search]').fill(surname);
+    const card = page.locator('.patient-card', { hasText: surname });
+    await expect(card).toBeVisible({ timeout: 15_000 });
+
+    await page.locator(`[data-testid=delete-patient-${patientId}]`).click();
+    const dialog = page.locator('[data-testid=confirm-dialog]');
+    await expect(dialog).toBeVisible();
+    // The dialog names the patient, so it is impossible to confirm blind.
+    await expect(dialog).toContainText(surname);
+    await expect(dialog).toContainText('cannot be undone');
+
+    await page.locator('[data-testid=confirm-cancel]').click();
+    await expect(dialog).toHaveCount(0);
+    // The card survives — this is the assertion that catches a delete firing
+    // on open, which a test that only ever confirms would never notice.
+    await expect(card).toBeVisible();
+
+    // --- confirm deletes ---
+    await page.locator(`[data-testid=delete-patient-${patientId}]`).click();
+    await expect(dialog).toBeVisible();
+    await page.locator('[data-testid=confirm-accept]').click();
+
+    await expect(page.locator('.message.success')).toContainText(surname, { timeout: 30_000 });
+    await expect(page.locator('.message.success')).toContainText('removed');
+    await expect(card).toHaveCount(0);
+
+    // --- and it is gone from both back ends ---
+    const after = await page.evaluate(async ([id, ehrId]) => {
+      const readStatus = await fetch(`/api/patients/${id}`).then((r) => r.status);
+      const bundles = await fetch(
+        `/api/patients/${id}/deletion-preview`,
+      ).then((r) => r.json());
+      const compositions = await fetch(`/api/ehr/${ehrId}/compositions`)
+        .then((r) => r.json())
+        .then((d) => d.compositions.length);
+      return { readStatus, bundles: bundles.bundles, compositions };
+    }, [patientId, seeded.ehrId!]);
+
+    // HAPI answers 410 Gone for a deleted resource, not 404.
+    expect([404, 410]).toContain(after.readStatus);
+    expect(after.bundles).toBe(0);
+    expect(after.compositions).toBe(0);
+  });
+
+  /**
+   * The header's delete goes through a DIFFERENT owner than the list's.
+   *
+   * The header emits an event and the shell owns the dialog, so this path can
+   * break while the patient-list one still passes. What it has to get right and
+   * the list does not: leaving the patient-scoped views. Every view below the
+   * header is keyed on a patient id that no longer resolves.
+   */
+  test('@stack the header delete also leaves the patient-scoped views', async ({ page }) => {
+    const surname = `Hdrdel${Date.now()}`;
+    await page.goto('/#/patients');
+    await expect(page.locator('.patient-card').first()).toBeVisible({ timeout: 15_000 });
+
+    await page.locator('[data-testid=new-patient]').click();
+    await page.locator('[data-testid=np-firstName]').fill('Kop');
+    await page.locator('[data-testid=np-lastName]').fill(surname);
+    await page.locator('[data-testid=np-birthDate]').fill('1980-01-01');
+    await page.locator('[data-testid=np-save]').click();
+    await expect(page).toHaveURL(/#\/patients\/[^/]+\/compositions/, { timeout: 20_000 });
+
+    const patientId = page.url().match(/#\/patients\/([^/]+)\//)?.[1] ?? '';
+
+    await page.locator('[data-testid=header-delete-patient]').click();
+    await expect(page.locator('[data-testid=confirm-dialog]')).toContainText(surname);
+    await page.locator('[data-testid=confirm-accept]').click();
+
+    await expect(page).toHaveURL(/#\/patients$/, { timeout: 20_000 });
+    await expect(page.locator('[data-testid=header-delete-patient]')).toHaveCount(0);
+
+    const status = await page.evaluate(
+      (id) => fetch(`/api/patients/${id}`).then((r) => r.status),
+      patientId,
+    );
+    expect([404, 410]).toContain(status);
   });
 });

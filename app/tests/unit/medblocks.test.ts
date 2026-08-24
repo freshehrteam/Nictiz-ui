@@ -83,6 +83,41 @@ describe('ensureSearchHandlers (D-10)', () => {
     expect((root.querySelector('mb-search') as any).handleSearch).toBe(existing);
   });
 
+  /**
+   * The regression behind "adding a second Adverse reaction risk breaks the
+   * Substance (ATC) autopopulate".
+   *
+   * `mb-repeatable-simple.handleAdd()` is just `this.count++`, and the new
+   * occurrence is cloned with `unsafeHTML(slotNode.outerHTML)` — from
+   * serialized markup, so JS properties are lost and the copy starts with
+   * `handleSearch === undefined`. Nothing writes to a property of the host, so
+   * the `updated()` sweep never runs for it. `mb-connect` is the only signal
+   * that escapes, hence the listener; this asserts a copy that arrives with no
+   * host re-render still gets wired.
+   */
+  it('wires a search element that appears with no host re-render, via mb-connect', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const handleSearch = vi.fn(async () => []);
+
+    // The host's listener, as composition-form wires it.
+    host.addEventListener('mb-connect', (e: Event) => {
+      const target = e.composedPath()[0] as HTMLElement & { handleSearch?: unknown };
+      if (target?.tagName?.toLowerCase() !== 'mb-search') return;
+      if (typeof target.handleSearch !== 'function') target.handleSearch = handleSearch;
+    });
+
+    // A repeatable "add": a fresh copy appended without touching the host.
+    const copy = document.createElement('mb-search');
+    host.append(copy);
+    expect((copy as any).handleSearch).toBeUndefined();
+
+    copy.dispatchEvent(new CustomEvent('mb-connect', { bubbles: true, composed: true }));
+
+    expect((copy as any).handleSearch).toBe(handleSearch);
+    host.remove();
+  });
+
   it('reaches elements that connect late — repeatable copies, i.e. the actual bug', () => {
     const root = document.createElement('div');
     root.innerHTML = '<mb-search></mb-search>';

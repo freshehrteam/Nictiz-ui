@@ -59,8 +59,15 @@ const IMPORT_SETTLE_MS = 400;
  * typing shows "An unexpected error occurred" in the dropdown, which reads as a
  * terminology-server outage rather than an unwired callback.
  *
- * Must be called from `updated()` on every render — repeatable copies appear
- * after any interaction, not just at first paint.
+ * Must be called from `updated()` on every render AND from an `mb-connect`
+ * listener. `updated()` alone is not enough: `mb-repeatable-simple.handleAdd()`
+ * only does `this.count++`, which re-renders inside the Lit 1 tree and writes
+ * to no property of the host, so Lit 3 never schedules an update and
+ * `updated()` never runs for a newly added occurrence. Worse, the copy is
+ * built with `unsafeHTML(slotNode.outerHTML)` — cloned from serialized markup,
+ * so JS properties like `handleSearch` cannot survive. Every mb-* element does
+ * emit a bubbling, composed `mb-connect` on connect, and that is the only
+ * signal a repeatable copy gives us.
  */
 export function ensureSearchHandlers(
   root: ParentNode,

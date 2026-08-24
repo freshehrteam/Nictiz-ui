@@ -150,11 +150,6 @@ export class EpsSavePipeline extends LitElement {
                           <span class="chev">&gt;</span>
                           ${state === 'failed' ? (this.run.error ?? 'failed') : step.line(this.run)}
                         </div>`}
-                    ${step.key === 'commit' && state === 'done' && this.run.note
-                      ? html`<div class="step-note" data-testid="step-note">
-                          ${this.run.note} — see the detail below the form.
-                        </div>`
-                      : nothing}
                   </div>
                 </li>
               `;

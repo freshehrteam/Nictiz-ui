@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
 import { callerIdentity, type HeaderBag } from './identity';
+import { identifyBundleWithPatient } from './bundle-link';
 
 const here = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: resolve(here, '../../.env') });
@@ -201,7 +202,7 @@ app.use(express.text({ type: ['application/xml', 'text/xml'], limit: '10mb' }));
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', ORIGIN);
   res.header('Access-Control-Allow-Headers', 'Content-Type');
-  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,OPTIONS');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -433,8 +434,27 @@ app.get('/api/health', async (_req, res) => {
     health.fhirDetail = (err as Error).message;
   }
 
+  // openFHIR has no actuator; `/status` is the engine's own liveness route and
+  // the only one that answers without a payload. Its body is NOT forwarded:
+  // alongside the version it dumps the engine's whole environment, including
+  // OPENFHIR_DB_PASS, so only `engineVersion` is lifted out of it.
+  try {
+    const upstream = await fetch(`${OPENFHIR_BASE.replace(/\/$/, '')}/status`, {
+      headers: { Accept: 'application/json' },
+    });
+    health.openfhir = upstream.ok ? 'up' : `error ${upstream.status}`;
+    if (upstream.ok) {
+      const body = (await upstream.json()) as { engineVersion?: string };
+      if (body?.engineVersion) health.openfhirVersion = body.engineVersion;
+    }
+  } catch (err) {
+    health.openfhir = 'down';
+    health.openfhirDetail = (err as Error).message;
+  }
+
   health.ehrbaseBase = EHRBASE_BASE;
   health.fhirBase = FHIR_BASE;
+  health.openfhirBase = OPENFHIR_BASE;
   res.json(health);
 });
 
@@ -521,32 +541,51 @@ app.get('/api/patients/:id', (req, res) =>
 );
 
 /**
+ * Resolves a patient's EHR by the subject reference stamped at EHR-creation
+ * time. Shared by the read route below and by patient deletion, so the two can
+ * never disagree about which EHR belongs to whom.
+ *
+ * A 404 from EHRbase is a legitimate answer, not a failure — the patient has no
+ * EHR yet — and is reported here as `{status: 404, ehrId: null}` rather than
+ * thrown. Anything else upstream is passed back with its status so each caller
+ * can decide whether it is fatal.
+ */
+async function ehrIdForPatient(
+  patientId: string,
+): Promise<{ status: number; ehrId: string | null; ehr?: unknown; detail?: string }> {
+  const upstream = await ehrbase('ehr', {
+    subject_id: patientId,
+    subject_namespace: FHIR_NAMESPACE,
+  });
+
+  if (upstream.status === 404) return { status: 404, ehrId: null };
+  if (!upstream.ok) {
+    return { status: upstream.status, ehrId: null, detail: (await upstream.text()).slice(0, 500) };
+  }
+
+  const body = await upstream.json();
+  return { status: 200, ehrId: body?.ehr_id?.value ?? null, ehr: body };
+}
+
+/**
  * The EHR belonging to a FHIR patient.
  *
- * Resolution is by the subject reference stamped at EHR-creation time. EHRbase
- * answers 404 when nothing matches, which is a legitimate answer — a patient
- * with no EHR yet — so it is translated into a 404 body the SPA can branch on
- * rather than surfaced as an error.
+ * EHRbase answers 404 when nothing matches, which is a legitimate answer — a
+ * patient with no EHR yet — so it is translated into a 404 body the SPA can
+ * branch on rather than surfaced as an error.
  */
 app.get('/api/patients/:id/ehr', async (req, res) => {
   try {
-    const upstream = await ehrbase('ehr', {
-      subject_id: req.params.id,
-      subject_namespace: FHIR_NAMESPACE,
-    });
+    const found = await ehrIdForPatient(req.params.id);
 
-    if (upstream.status === 404) {
+    if (found.status === 404) {
       return res.status(404).json({ error: 'No EHR for this patient', patientId: req.params.id });
     }
-    if (!upstream.ok) {
-      return res.status(upstream.status).json({
-        error: 'EHR lookup failed',
-        detail: (await upstream.text()).slice(0, 500),
-      });
+    if (found.status !== 200) {
+      return res.status(found.status).json({ error: 'EHR lookup failed', detail: found.detail });
     }
 
-    const body = await upstream.json();
-    res.json({ ehrId: body?.ehr_id?.value ?? null, ehr: body });
+    res.json({ ehrId: found.ehrId, ehr: found.ehr });
   } catch (err) {
     res.status(502).json({ error: 'Cannot reach EHRbase', detail: (err as Error).message });
   }
@@ -634,6 +673,244 @@ app.post('/api/patients', async (req, res) => {
     res.status(201).json({ patientId, ehrId: ehr?.ehr_id?.value ?? null, patient });
   } catch (err) {
     res.status(502).json({ error: 'Patient creation failed', detail: (err as Error).message });
+  }
+});
+
+/**
+ * The uids of every live composition in an EHR.
+ *
+ * AQL never returns already-deleted compositions, so this is naturally
+ * idempotent: run it after a delete and it simply comes back empty. That is
+ * what makes calling the delete route twice safe rather than an error path.
+ */
+async function compositionUidsFor(ehrId: string | null): Promise<string[]> {
+  if (!ehrId) return [];
+  const result = await aql(
+    'SELECT c/uid/value FROM EHR e[ehr_id/value=$ehrId] CONTAINS COMPOSITION c',
+    { ehrId },
+  );
+  return (result.rows ?? []).map(([uid]) => String(uid ?? '')).filter(Boolean);
+}
+
+/**
+ * How many stored Bundles name this patient.
+ *
+ * `_summary=count` rather than reading the entries: the answer is a number and
+ * the Bundles are large. Searching on the bare value, with no `system|` prefix,
+ * is what HAPI supports here and was verified against this server.
+ *
+ * `Cache-Control: no-cache` is NOT optional, and the reason is easy to miss.
+ * HAPI caches search results, and the cached count SURVIVES a delete: straight
+ * after a successful conditional delete this query still answered `total: 1`
+ * while the same search without `_summary` correctly answered 0 and the
+ * resource itself read 410 Gone. Measured live on this server. Without the
+ * header the delete under-reports what it removed, and the deletion preview
+ * offers to remove Bundles that are already gone.
+ */
+async function countBundlesFor(patientId: string): Promise<number> {
+  const upstream = await fetch(
+    fhirUrl('Bundle', { identifier: patientId, _summary: 'count' }),
+    { headers: { Accept: 'application/fhir+json', 'Cache-Control': 'no-cache' } },
+  );
+  if (!upstream.ok) return 0;
+  const body = await upstream.json();
+  return Number(body?.total ?? 0);
+}
+
+/**
+ * The ids of every stored Bundle naming this patient.
+ *
+ * Ids rather than a conditional delete: see the delete route for why the
+ * advertised `conditionalDelete: multiple` cannot be relied on here. Same
+ * no-cache reasoning as `countBundlesFor`.
+ *
+ * The obvious optimisation — `_elements=id`, to avoid pulling back Bundles that
+ * are tens of kilobytes each — does NOT work on this server: it answers a
+ * SUBSETTED searchset carrying `total` but NO `entry` array at all, so the ids
+ * come back empty and nothing is deleted. Measured live. The full read is the
+ * price of getting the ids.
+ */
+async function bundleIdsFor(patientId: string): Promise<string[]> {
+  const upstream = await fetch(
+    fhirUrl('Bundle', { identifier: patientId, _count: '200' }),
+    { headers: { Accept: 'application/fhir+json', 'Cache-Control': 'no-cache' } },
+  );
+  if (!upstream.ok) return [];
+  const body = await upstream.json();
+  return (body?.entry ?? [])
+    .map((e: any) => e?.resource?.id)
+    .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0);
+}
+
+/**
+ * What deleting this patient would remove.
+ *
+ * Exists so the confirmation dialog can name real numbers instead of hedging.
+ * It resolves them through the same helpers the delete below uses, which is the
+ * point: a dialog that promised different counts than the delete performed
+ * would be worse than one that said nothing.
+ */
+app.get('/api/patients/:id/deletion-preview', async (req, res) => {
+  try {
+    const found = await ehrIdForPatient(req.params.id);
+    const ehrId = found.status === 200 ? found.ehrId : null;
+
+    res.json({
+      patientId: req.params.id,
+      ehrId,
+      compositions: (await compositionUidsFor(ehrId)).length,
+      bundles: await countBundlesFor(req.params.id),
+    });
+  } catch (err) {
+    res.status(502).json({ error: 'Could not read patient footprint', detail: (err as Error).message });
+  }
+});
+
+/**
+ * Deletes a patient and everything attributable to them.
+ *
+ * Non-transactional, deliberately, and for the same reason `POST /api/patients`
+ * is: there is no distributed transaction spanning EHRbase and HAPI, so the
+ * honest choice is to report exactly what happened rather than to pretend a
+ * rollback occurred. Every response carries a full report; a partial failure is
+ * a 200 with a populated `failed[]`, not a bare error the caller must guess at.
+ *
+ * The ORDER is the load-bearing part. The patient goes LAST, so a failure
+ * anywhere before it leaves a state the user can retry — they can still find
+ * the patient in the list and press delete again. Deleting the patient first
+ * would strand the compositions and Bundles behind an id nothing points to.
+ *
+ * Two limits are inherent rather than bugs. `DELETE /ehr/{id}` is 405 on this
+ * CDR and the admin API is 403 with these credentials, so the EHR SHELL
+ * SURVIVES — empty, but present. And composition deletion in openEHR is
+ * logical: a deleted version is appended and the history is retained.
+ */
+app.delete('/api/patients/:id', async (req, res) => {
+  const patientId = req.params.id;
+
+  const report = {
+    patientId,
+    ehrId: null as string | null,
+    compositions: { found: 0, deleted: 0, failed: [] as unknown[] },
+    bundles: { found: 0, deleted: 0, failed: [] as unknown[] },
+    patient: { deleted: false },
+  };
+
+  try {
+    // Nothing is touched before this read. A patient who is not there is a
+    // clean 404, not a half-run delete — which is what makes calling this
+    // endpoint twice safe.
+    const existing = await fetch(fhirUrl(`Patient/${encodeURIComponent(patientId)}`), {
+      headers: { Accept: 'application/fhir+json' },
+    });
+    if (existing.status === 404 || existing.status === 410) {
+      return res.status(404).json({ error: 'No such patient', patientId });
+    }
+    if (!existing.ok) {
+      return res.status(existing.status).json({
+        error: 'Patient lookup failed',
+        detail: (await existing.text()).slice(0, 500),
+      });
+    }
+
+    const found = await ehrIdForPatient(patientId);
+    const ehrId = found.status === 200 ? found.ehrId : null;
+    const compositionUids = await compositionUidsFor(ehrId);
+    // Read once and reused for both `found` and the delete loop, so the report
+    // can never claim to have found a different number than it acted on.
+    const bundleIds = await bundleIdsFor(patientId);
+
+    report.ehrId = ehrId;
+    report.compositions.found = compositionUids.length;
+    report.bundles.found = bundleIds.length;
+
+    // 1. Compositions. Sequentially and individually caught: one composition
+    //    the CDR refuses must not abort the rest of the delete, and the report
+    //    has to be able to name which one it was.
+    for (const uid of compositionUids) {
+      try {
+        // The FULL versioned uid, unsplit. It is the `preceding_version_uid`
+        // the CDR requires here — unlike the PUT handler above, which splits it
+        // because there the versioned half travels in `If-Match` instead.
+        const upstream = await ehrbase(
+          `ehr/${encodeURIComponent(ehrId as string)}/composition/${encodeURIComponent(uid)}`,
+          {},
+          { method: 'DELETE' },
+        );
+
+        // 404 means someone else already removed it — the desired end state.
+        if (upstream.ok || upstream.status === 404) report.compositions.deleted += 1;
+        else {
+          report.compositions.failed.push({
+            uid,
+            status: upstream.status,
+            detail: (await upstream.text()).slice(0, 300),
+          });
+        }
+      } catch (err) {
+        report.compositions.failed.push({ uid, status: 0, detail: (err as Error).message });
+      }
+    }
+
+    // 2. Bundles, resolved to ids and deleted ONE BY ONE.
+    //
+    //    Not a conditional delete, despite this server's CapabilityStatement
+    //    advertising `conditionalDelete: multiple` on Bundle. That declaration
+    //    is not true here: a conditional delete matching two Bundles is refused
+    //    with `412 HAPI-0962: ... because this search matched 2 resources`,
+    //    because HAPI's `allow_multiple_delete` is off. Measured live — the
+    //    single-match case succeeds, which is exactly what makes the capability
+    //    look correct until a patient has a second Bundle.
+    //
+    //    Deleting by id also buys the same per-item reporting the compositions
+    //    get: one Bundle HAPI refuses is named, and the rest still go.
+    for (const bundleId of bundleIds) {
+      try {
+        const upstream = await fetch(fhirUrl(`Bundle/${encodeURIComponent(bundleId)}`), {
+          method: 'DELETE',
+          headers: { Accept: 'application/fhir+json' },
+        });
+
+        // 410 Gone is already-deleted — the end state we wanted.
+        if (upstream.ok || upstream.status === 404 || upstream.status === 410) {
+          report.bundles.deleted += 1;
+        } else {
+          report.bundles.failed.push({
+            id: bundleId,
+            status: upstream.status,
+            detail: (await upstream.text()).slice(0, 300),
+          });
+        }
+      } catch (err) {
+        report.bundles.failed.push({ id: bundleId, status: 0, detail: (err as Error).message });
+      }
+    }
+
+    // 3. The patient, last. Nothing in this stack references it — the stored
+    //    Bundles carry no Patient resource and no subject — so referential
+    //    integrity should not block, but a 409 is surfaced verbatim rather than
+    //    escalated: `$expunge` is destructive and is the operator's call.
+    const deleted = await fetch(fhirUrl(`Patient/${encodeURIComponent(patientId)}`), {
+      method: 'DELETE',
+      headers: { Accept: 'application/fhir+json' },
+    });
+
+    if (deleted.ok || deleted.status === 404 || deleted.status === 410) {
+      report.patient.deleted = true;
+      return res.json(report);
+    }
+
+    return res.status(deleted.status).json({
+      ...report,
+      error: 'Patient could not be deleted',
+      detail: (await deleted.text()).slice(0, 500),
+      hint:
+        'HAPI refused the delete, usually because something still references ' +
+        'the Patient. $expunge can force it, but it is irreversible and is not ' +
+        'attempted automatically.',
+    });
+  } catch (err) {
+    res.status(502).json({ ...report, error: 'Patient deletion failed', detail: (err as Error).message });
   }
 });
 
@@ -831,7 +1108,12 @@ app.post('/api/openfhir/tofhir', (req, res) => {
  * interceptor maps it back to openEHR and commits it to EHRbase as a NEW
  * composition, answering with a composition URL and no Bundle id. Persisting a
  * freshly mapped Bundle would therefore duplicate the composition on every
- * single save, into a CDR whose composition DELETE is disabled.
+ * single save.
+ *
+ * (An earlier version of this comment added "into a CDR whose composition
+ * DELETE is disabled". That was wrong: `OPTIONS` on a composition reports
+ * `Allow: PUT,DELETE,GET,HEAD,OPTIONS`, and patient deletion above relies on
+ * it. Duplicated compositions would be cleanable — just silently wrong.)
  *
  * Verified against the running stack, which is the only way this is knowable.
  */
@@ -874,14 +1156,24 @@ function stripInterceptedProfile(bundle: any): any {
   };
 }
 
-/** Stores a mapped Bundle. See `stripInterceptedProfile` for why it is edited. */
-app.post('/api/fhir/Bundle', (req, res) =>
-  forwardFhir(res, fhirUrl('Bundle'), {
+/**
+ * Stores a mapped Bundle. See `stripInterceptedProfile` for why it is edited.
+ *
+ * `?patientId=` is optional on purpose: without it the request behaves exactly
+ * as it always has, so every existing caller keeps working unchanged. With it
+ * the Bundle becomes attributable, which is what makes patient deletion able to
+ * find and remove it.
+ */
+app.post('/api/fhir/Bundle', (req, res) => {
+  const patientId = req.query.patientId ? String(req.query.patientId) : '';
+  const stripped = stripInterceptedProfile(req.body);
+
+  return forwardFhir(res, fhirUrl('Bundle'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/fhir+json', Prefer: 'return=representation' },
-    body: JSON.stringify(stripInterceptedProfile(req.body)),
-  }),
-);
+    body: JSON.stringify(patientId ? identifyBundleWithPatient(stripped, patientId) : stripped),
+  });
+});
 
 app.get('/api/fhir/Bundle/:id', (req, res) =>
   forwardFhir(res, fhirUrl(`Bundle/${encodeURIComponent(req.params.id)}`)),
