@@ -601,15 +601,11 @@ test.describe('mandatory fields', () => {
 });
 
 test.describe('settings', () => {
-  test('@stack shows both servers, the template list and the demo-data warning', async ({ page }) => {
+  test('@stack shows both servers and the template list', async ({ page }) => {
     await page.goto('/#/settings');
 
     await expect(page.locator('.pill.up').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('.template-row', { hasText: TEMPLATE })).toBeVisible();
-    await expect(page.locator('.pill.demo')).toBeVisible();
-    await expect(page.locator('.card', { hasText: 'Security' })).toContainText(
-      'no user authentication',
-    );
     await expect(page.locator('[data-testid=opt-upload]')).toBeAttached();
   });
 });

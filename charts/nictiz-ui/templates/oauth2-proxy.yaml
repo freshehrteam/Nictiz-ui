@@ -66,6 +66,15 @@ spec:
             # an extra click that offers no choice.
             - name: OAUTH2_PROXY_SKIP_PROVIDER_BUTTON
               value: "true"
+            # The UI's logout button navigates to /oauth2/sign_out. That alone
+            # only clears THIS proxy's session cookie — the Keycloak SSO
+            # session would survive, and the very next /oauth2/start would
+            # silently log the same user straight back in. This makes sign_out
+            # also end the Keycloak session, server-side ({id_token} is
+            # substituted from the proxy's stored session), so no whitelist
+            # domain or registered post-logout redirect URI is needed.
+            - name: OAUTH2_PROXY_BACKEND_LOGOUT_URL
+              value: {{ printf "%s/protocol/openid-connect/logout?id_token_hint={id_token}" .Values.oidc.issuerUrl | quote }}
             {{- if .Values.auth.oauth2Proxy.skipJwtBearerTokens }}
             # Also accept a valid Bearer JWT in place of a session cookie
             # (curl/CI smoke tests). Service-account tokens carry the

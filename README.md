@@ -145,7 +145,7 @@ helm upgrade --install nictiz-ui charts/nictiz-ui \
   -n health-stack \
   -f charts/nictiz-ui/values-hetzner.yaml \
   --set ingress.host=nictiz-demo.<domain> \
-  --set image.tag=v0.1.0
+  --set image.tag=0.2.1     # NOTE: unprefixed — git tag v0.2.1 publishes Docker tag 0.2.1
 ```
 
 The namespace **must** be the health-stack one: the BFF resolves `ehrbase`,

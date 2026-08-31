@@ -39,6 +39,13 @@ const FALLBACK_USER: User = {
 let user: User = FALLBACK_USER;
 
 /**
+ * Whether the edge proxy actually identified someone. False locally (no gate)
+ * and until `resolveUser()` answers — which is exactly when a logout button
+ * would be a lie: there is no session to end.
+ */
+let authenticated = false;
+
+/**
  * Who is recording. Synchronous by design — `mb-form.ctx` and
  * `ensureMandatoryContext()` both need an answer during render, not a promise.
  */
@@ -59,12 +66,32 @@ export async function resolveUser(): Promise<User> {
     const res = await fetch('/api/me', { headers: { Accept: 'application/json' } });
     if (!res.ok) return user;
 
-    const body = (await res.json()) as Partial<User> | null;
+    const body = (await res.json()) as (Partial<User> & { authenticated?: boolean }) | null;
     if (body?.name) user = { id: body.id ?? body.name, name: body.name };
+    authenticated = body?.authenticated === true;
   } catch {
     // Offline or BFF down — the fallback already covers it.
   }
   return user;
+}
+
+/** True only when the BFF reported a proxy-verified identity. */
+export function isAuthenticated(): boolean {
+  return authenticated;
+}
+
+/**
+ * Ends the session: a full-page navigation to oauth2-proxy's sign-out
+ * endpoint, which clears the session cookie AND (via the proxy's backend
+ * logout URL) ends the Keycloak SSO session — without that second half the
+ * next request would silently log the same user straight back in. Landing
+ * back on `/` unauthenticated then redirects to the Keycloak login.
+ *
+ * A navigation, not a fetch: the proxy sits in FRONT of this origin, and the
+ * cookie it must clear belongs to the top-level document.
+ */
+export function logout(): void {
+  window.location.href = '/oauth2/sign_out';
 }
 
 /**

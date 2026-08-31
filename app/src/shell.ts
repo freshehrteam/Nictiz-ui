@@ -33,6 +33,7 @@ import './views/confirm-dialog';
 
 import { getHealth, type HealthStatus } from './openehr/client';
 import { getPatient, deletePatient, getDeletionPreview } from './fhir/client';
+import { currentUser, isAuthenticated, logout } from './auth/session';
 import type { PatientView } from './fhir/patient';
 
 export interface Route {
@@ -259,6 +260,14 @@ export class EpsApp extends LitElement {
           : nothing}
 
         <div class="sidebar-foot">
+          ${isAuthenticated()
+            ? html`
+                <div class="sidebar-user">
+                  <span class="user-name" title=${currentUser().name}>${currentUser().name}</span>
+                  <button class="logout" @click=${logout} data-testid="logout">Log out</button>
+                </div>
+              `
+            : nothing}
           <div class="conn">
             <span class="dot ${this.health?.ehrbase === 'up' ? 'up' : 'down'}"></span>
             EHRbase ${this.health?.ehrbase ?? 'checking…'}

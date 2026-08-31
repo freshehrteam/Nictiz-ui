@@ -1,15 +1,10 @@
 /**
  * Settings — server status, counts, template list and OPT upload.
- *
- * Also the place where the two things a reader must not have to discover for
- * themselves are stated plainly: that the demo patients are fictional, and that
- * this BFF applies no per-user access control of its own.
  */
 
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { getStats, listTemplates, uploadTemplate, type HealthStatus, type Stats } from '../openehr/client';
-import { currentUser } from '../auth/session';
 
 @customElement('eps-settings')
 export class EpsSettings extends LitElement {
@@ -149,47 +144,6 @@ export class EpsSettings extends LitElement {
               <span class="muted">
                 Operational templates are uploaded to EHRbase and become available immediately.
               </span>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-head">
-            <h3>Data provenance</h3>
-            <span class="pill demo">demo data</span>
-          </div>
-          <div class="card-body">
-            <p style="margin-top:0">
-              The demo patients in this environment are
-              <strong>fictional</strong>. They carry the FHIR tag
-              <code class="mono">data-origin = demo</code> and use BSNs from the reserved
-              <code class="mono">999…</code> test range, so none can collide with a real citizen
-              service number.
-            </p>
-            <!--
-              Deliberately NOT "ehrs - patients": an EHR can be created without a
-              patient at any time, so that subtraction is a guess dressed up as a
-              count. State the relationship instead of computing a wrong number.
-            -->
-            <p class="muted" style="margin-bottom:0">
-              Of ${this.stats?.ehrs ?? '—'} EHRs in this CDR, only those with a patient reference
-              appear in the patient list. The rest — including the orphans left by the earlier
-              evaluation PoC — have no demographics and are deliberately not shown.
-            </p>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-head"><h3>Security</h3></div>
-          <div class="card-body">
-            <div class="message error" style="margin:0">
-              <strong>There is no per-user authorisation.</strong> The BFF talks to EHRbase as one
-              shared service account and applies no per-user access control, so anyone who gets past
-              the gate can read and write every record. Deployed, that gate is the Keycloak login at
-              the ingress and compositions are filed under whoever logged in
-              (currently <code>${currentUser().name}</code>); locally there is no gate at all.
-              Per-user authorisation and an audit trail must be in place before this carries real
-              patient data.
             </div>
           </div>
         </div>

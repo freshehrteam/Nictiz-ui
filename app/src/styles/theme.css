@@ -190,6 +190,41 @@ eps-app .sidebar-foot {
   border-top: 1px solid rgb(255 255 255 / 10%);
 }
 
+/* Logged-in identity + sign-out, pinned above the connection dots. Rendered
+   only when the edge proxy identified someone — locally there is no session
+   to end, so the row is absent rather than a dead button. */
+eps-app .sidebar-user {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+eps-app .sidebar-user .user-name {
+  color: rgb(234 245 245 / 75%);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+eps-app .sidebar-user .logout {
+  flex: none;
+  padding: 4px 10px;
+  font: inherit;
+  color: rgb(234 245 245 / 85%);
+  background: rgb(255 255 255 / 8%);
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: var(--eps-radius-sm);
+  cursor: pointer;
+}
+
+eps-app .sidebar-user .logout:hover {
+  background: rgb(255 255 255 / 15%);
+  color: #fff;
+}
+
 eps-app .conn {
   display: flex;
   align-items: center;

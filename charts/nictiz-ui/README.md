@@ -23,7 +23,7 @@ cross-origin problem the BFF exists to remove, in exchange for nothing.
 |---|---|
 | Namespace | The one the `health-stack` release occupies (`health-stack`) |
 | Secret | `keycloak-secret` (the stack's Keycloak bootstrap admin) — read by the registration Job |
-| Realm | `freshehr`, with its `USER` realm role — the stack's realm import provides both |
+| Realm | `freshehr`, with its `USER` realm role and the `openfhir.map` client scope — the stack's realm import provides all of these (a pre-native-OAuth stack realm lacks the scope; the Job then warns and skips it) |
 | Cluster | ingress-nginx + cert-manager, installed by the stack's Terraform |
 | DNS | `ingress.host` resolving to the hcloud load balancer IP |
 
@@ -44,8 +44,11 @@ content for this app lives in the stack repo:
    post-upgrade hook): runs `scripts/register-clients.ts` from this app's own
    image against Keycloak's admin API. Idempotent create-or-update of:
    - `nictiz-ui-svc` — `client_credentials` service account for the
-     BFF→EHRbase hop, with the `oauth2-proxy` audience mapper and realm role
-     `USER`;
+     BFF→EHRbase and BFF→openFHIR hops, with the `oauth2-proxy` audience
+     mapper, the `tenant: freshehr` claim mapper (the protected openFHIR
+     engine keys its data store by that claim), the `openfhir.map` optional
+     client scope (the engine's mapping API demands it; the BFF requests it
+     via `scope=`), and realm role `USER`;
    - `nictiz-ui` — standard-flow client for the browser login, redirect URI
      derived from `ingress.host` (one source of truth — realm and ingress
      cannot drift);
@@ -72,8 +75,12 @@ from, and that can silently disagree with the working tree.
 helm upgrade --install nictiz-ui . \
   -n health-stack \
   -f values-hetzner.yaml \
-  --set image.tag=v0.2.0
+  --set image.tag=0.2.1
 ```
+
+> ⚠ Image tags are **unprefixed**: the build workflow strips the `v` from git
+> tags, so git tag `v0.2.1` publishes Docker tag `0.2.1`. Passing
+> `image.tag=v0.2.1` ends in `ErrImagePull`.
 
 No out-of-band Secret creation and no manual Keycloak work: the chart
 generates its secrets and the Job registers the clients.
@@ -120,6 +127,7 @@ which surfaces as opaque JSON-parse errors in the app, not as a login screen.
 | `auth-response-headers` | Copies the verified `X-Auth-Request-User`/`-Email`/`-Preferred-Username` onto the proxied request |
 | BFF `REQUIRE_AUTH` | Rejects requests carrying no proxy identity |
 | BFF → EHRbase | `client_credentials` Bearer token as `nictiz-ui-svc` (EHRbase runs `SECURITY_AUTHTYPE=OAUTH`) |
+| BFF → openFHIR | Same `nictiz-ui-svc` token with `scope=openfhir.map` + `tenant: freshehr` claim (the engine runs `openfhir.protected` with per-API scopes; `/status` health probe stays permitAll) |
 | NetworkPolicy | Only ingress-nginx may connect to the BFF and proxy pods |
 
 Layered because the BFF *trusts* the identity its proxy asserts — inherent to

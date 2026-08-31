@@ -125,6 +125,43 @@ describe('resolveUser', () => {
   });
 });
 
+describe('isAuthenticated', () => {
+  it('is false before resolution — no session, no logout button', async () => {
+    const { isAuthenticated } = await freshSession();
+
+    expect(isAuthenticated()).toBe(false);
+  });
+
+  it('is true only when the BFF says the edge proxy identified someone', async () => {
+    stubMe({ id: 'demo', name: 'Demo User', authenticated: true });
+    const { resolveUser, isAuthenticated } = await freshSession();
+
+    await resolveUser();
+
+    expect(isAuthenticated()).toBe(true);
+  });
+
+  it('stays false for the unauthenticated local-dev answer', async () => {
+    // Locally the BFF still names a fallback user, but there is no session
+    // behind it — offering a logout button would navigate into a 404.
+    stubMe({ id: 'anonymous', name: 'Demo User', authenticated: false });
+    const { resolveUser, isAuthenticated } = await freshSession();
+
+    await resolveUser();
+
+    expect(isAuthenticated()).toBe(false);
+  });
+
+  it('stays false when /api/me fails', async () => {
+    stubMe({ error: 'nope' }, false);
+    const { resolveUser, isAuthenticated } = await freshSession();
+
+    await resolveUser();
+
+    expect(isAuthenticated()).toBe(false);
+  });
+});
+
 describe('composer wiring (the freeze trap)', () => {
   it('reflects the resolved user, not the value at import time', async () => {
     stubMe({ id: 'demo', name: 'Demo User' });
