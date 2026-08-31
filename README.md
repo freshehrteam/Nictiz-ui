@@ -43,10 +43,11 @@ Then open http://localhost:5173.
 ## Security — read before deploying
 
 **The application performs no user authentication of its own.** The BFF talks
-to EHRbase as one shared service account (`nictiz-ui-svc`, OAuth2
-`client_credentials` against the freshehr Keycloak realm) and applies no
-per-user access control. Whoever gets past the gate can read and write every
-record in the CDR.
+to EHRbase and openFHIR as one shared service account (`nictiz-ui-svc`, OAuth2
+`client_credentials` against the freshehr Keycloak realm; the openFHIR calls
+carry scope `openfhir.map` and the hardcoded `tenant: freshehr` claim the
+protected engine keys its store by) and applies no per-user access control.
+Whoever gets past the gate can read and write every record in the CDR.
 
 Two different postures follow from that:
 
@@ -195,7 +196,7 @@ the returned Bundle has more than one entry before believing the path works.
 |---|---|---|
 | ingress-nginx `auth-url` → oauth2-proxy | Sends anonymous browsers to the Keycloak login; verifies the session per request | 302 to login before the BFF is reached |
 | BFF `REQUIRE_AUTH` | Rejects requests with no proxy identity | 401 — a direct pod hit cannot bypass the gate |
-| BFF → EHRbase | Bearer token as `nictiz-ui-svc` (`client_credentials`) | 502 with a Keycloak hint when tokens cannot be fetched |
+| BFF → EHRbase / openFHIR | Bearer token as `nictiz-ui-svc` (`client_credentials`; openFHIR additionally checks scope `openfhir.map` + the `tenant` claim) | 502 with a Keycloak hint when tokens cannot be fetched |
 | NetworkPolicy | Only ingress-nginx may open a connection to the pods | Lateral in-cluster access is refused |
 
 The three are layered because the BFF *trusts* the identity its proxy asserts —

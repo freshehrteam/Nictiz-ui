@@ -119,16 +119,22 @@ const tokens = createTokenManager({
   tokenUrl: OIDC_TOKEN_URL,
   clientId: OIDC_CLIENT_ID,
   clientSecret: OIDC_CLIENT_SECRET,
+  // One shared token serves both upstreams. EHRbase authorizes on
+  // realm_access.roles and ignores the scope claim; the openFHIR engine
+  // (openfhir.protected) demands SCOPE_openfhir.map on /openfhir/tofhir —
+  // and it is an OPTIONAL client scope in the realm, present only when
+  // requested. Registered onto nictiz-ui-svc by scripts/register-clients.ts.
+  scope: 'openfhir.map',
 });
 
 /**
- * fetch against EHRbase as the service account, retrying exactly ONCE on 401.
+ * fetch an upstream as the service account, retrying exactly ONCE on 401.
  *
  * A 401 with a token the cache believed valid means clock drift, a Keycloak
  * restart, or a revoked session — all settled by one fresh token. More retries
  * would only hammer a genuinely broken auth config with the same failure.
  */
-async function ehrbaseFetch(url: string, init: RequestInit = {}): Promise<Response> {
+async function bearerFetch(url: string, init: RequestInit = {}): Promise<Response> {
   const request = (token: string) =>
     fetch(url, {
       ...init,
@@ -144,6 +150,11 @@ async function ehrbaseFetch(url: string, init: RequestInit = {}): Promise<Respon
 
   tokens.invalidate();
   return request(await tokens.getToken());
+}
+
+/** fetch against EHRbase as the service account. */
+async function ehrbaseFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  return bearerFetch(url, init);
 }
 
 const app = express();
@@ -318,14 +329,20 @@ async function forwardFhir(
 /**
  * openFHIR forwarder.
  *
- * Separate from `forward()` for two reasons. It must NOT inject EHRbase's
- * Bearer token — openFHIR is unauthenticated in-cluster — and, more
- * importantly, **openFHIR answers errors in plain text**, not JSON: the engine
- * does `ResponseEntity.badRequest().body(e.getMessage())`, so a mapping failure
+ * Separate from `forward()` because **openFHIR answers errors in plain
+ * text**, not JSON: the engine does
+ * `ResponseEntity.badRequest().body(e.getMessage())`, so a mapping failure
  * arrives as a bare sentence. Passing that through verbatim would make the
  * browser's `json()` helper die on a parse error and report a syntax error
  * instead of the engine's actual complaint, which is the one thing worth
  * knowing. Non-2xx bodies are therefore wrapped as `{ error: <text> }`.
+ *
+ * Authenticated like the EHRbase hop: the engine runs as an OAuth2 resource
+ * server (openfhir.protected in the stack), and /openfhir/tofhir demands
+ * scope `openfhir.map` — which the shared token manager requests. The token's
+ * `tenant: freshehr` claim (hardcoded mapper on nictiz-ui-svc) selects the
+ * engine-side data store; without it the engine silos this client under its
+ * own `sub` and finds no contexts/mappings.
  */
 async function forwardOpenFhir(
   res: express.Response,
@@ -333,10 +350,7 @@ async function forwardOpenFhir(
   init: RequestInit = {},
 ): Promise<void> {
   try {
-    const upstream = await fetch(url, {
-      ...init,
-      headers: { Accept: 'application/json', ...(init.headers ?? {}) },
-    });
+    const upstream = await bearerFetch(url, init);
 
     const body = await upstream.text();
     if (!upstream.ok) {

@@ -12,8 +12,13 @@
  * realm; this sidesteps that limitation entirely). What it ensures:
  *
  *   - `nictiz-ui-svc` — client_credentials service account for the BFF's
- *     BFF→EHRbase hop, with the `oauth2-proxy` audience mapper (so its tokens
- *     also pass the stack's edge validator) and realm role USER.
+ *     BFF→EHRbase and BFF→openFHIR hops, with the `oauth2-proxy` audience
+ *     mapper (so its tokens also pass the stack's edge validator), the
+ *     `tenant: freshehr` claim mapper (the protected openFHIR engine keys its
+ *     data store by that claim — without it this client is siloed under its
+ *     own `sub` and sees none of the stack's mappings), the `openfhir.map`
+ *     optional client scope (the engine's mapping API demands it; the BFF
+ *     requests it via scope=), and realm role USER.
  *   - `nictiz-ui`     — standard-flow client the UI's session-mode
  *     oauth2-proxy authenticates browser users as; redirect URI derived from
  *     UI_ORIGIN, which IS the chart's ingress.host — one source of truth.
@@ -65,6 +70,31 @@ const AUDIENCE_MAPPER = {
     'id.token.claim': 'false',
   },
 };
+
+/**
+ * The tenant claim the protected openFHIR engine keys its data store by.
+ * Every client of the freshehr stack hardcodes `tenant: freshehr` (same
+ * mapper the stack puts on its own api-client/hapi-svc) so all of them share
+ * one engine-side store; the engine's fallback is the token's `sub`, which
+ * would silo this client into an empty one.
+ */
+const TENANT_MAPPER = {
+  name: 'openfhir-tenant',
+  protocol: 'openid-connect',
+  protocolMapper: 'oidc-hardcoded-claim-mapper',
+  consentRequired: false,
+  config: {
+    'claim.name': 'tenant',
+    'claim.value': 'freshehr',
+    'jsonType.label': 'String',
+    'access.token.claim': 'true',
+    'id.token.claim': 'false',
+    'userinfo.token.claim': 'false',
+  },
+};
+
+/** The one openFHIR per-API scope the BFF needs: /openfhir/tofhir (mapping API). */
+const OPENFHIR_SCOPE = 'openfhir.map';
 
 export async function registerClients(cfg: RegistrarConfig): Promise<void> {
   const fetchImpl = cfg.fetchImpl ?? fetch;
@@ -141,13 +171,45 @@ export async function registerClients(cfg: RegistrarConfig): Promise<void> {
     return created[0].id;
   }
 
-  async function ensureAudienceMapper(clientDbId: string): Promise<void> {
+  async function ensureMapper(
+    clientDbId: string,
+    mapper: { name: string } & Record<string, unknown>,
+  ): Promise<void> {
     const mappers = (await (
       await api('GET', `/clients/${clientDbId}/protocol-mappers/models`)
     ).json()) as Array<{ name: string }>;
-    if (!mappers.some((m) => m.name === AUDIENCE_MAPPER.name)) {
-      await api('POST', `/clients/${clientDbId}/protocol-mappers/models`, AUDIENCE_MAPPER);
-      log(`added ${AUDIENCE_MAPPER.name} mapper`);
+    if (!mappers.some((m) => m.name === mapper.name)) {
+      await api('POST', `/clients/${clientDbId}/protocol-mappers/models`, mapper);
+      log(`added ${mapper.name} mapper`);
+    }
+  }
+
+  /**
+   * Attach a realm client scope as OPTIONAL on the client (requested via
+   * scope=). Tolerates the scope not existing: a stack realm from before
+   * openFHIR native OAuth has no per-API scopes AND an unprotected engine, so
+   * the BFF works there without it — warn rather than fail the whole
+   * registration.
+   */
+  async function ensureOptionalScope(clientDbId: string, scopeName: string): Promise<void> {
+    const all = (await (await api('GET', '/client-scopes')).json()) as Array<{
+      id: string;
+      name: string;
+    }>;
+    const scope = all.find((s) => s.name === scopeName);
+    if (!scope) {
+      log(
+        `WARNING: client scope '${scopeName}' not found in realm '${cfg.realm}' — ` +
+          `stack realm predates openFHIR native OAuth; skipping (BFF→openFHIR will only work unprotected)`,
+      );
+      return;
+    }
+    const attached = (await (
+      await api('GET', `/clients/${clientDbId}/optional-client-scopes`)
+    ).json()) as Array<{ name: string }>;
+    if (!attached.some((s) => s.name === scopeName)) {
+      await api('PUT', `/clients/${clientDbId}/optional-client-scopes/${scope.id}`);
+      log(`attached optional client scope ${scopeName}`);
     }
   }
 
@@ -178,7 +240,7 @@ export async function registerClients(cfg: RegistrarConfig): Promise<void> {
   const svcDbId = await ensureClient({
     clientId: cfg.svcClientId,
     name: 'Nictiz EMR BFF',
-    description: 'client_credentials service account for the nictiz-ui BFF→EHRbase hop. Registered by the nictiz-ui release.',
+    description: 'client_credentials service account for the nictiz-ui BFF→EHRbase and BFF→openFHIR hops. Registered by the nictiz-ui release.',
     enabled: true,
     protocol: 'openid-connect',
     publicClient: false,
@@ -190,7 +252,9 @@ export async function registerClients(cfg: RegistrarConfig): Promise<void> {
     directAccessGrantsEnabled: false,
     fullScopeAllowed: true,
   });
-  await ensureAudienceMapper(svcDbId);
+  await ensureMapper(svcDbId, AUDIENCE_MAPPER);
+  await ensureMapper(svcDbId, TENANT_MAPPER);
+  await ensureOptionalScope(svcDbId, OPENFHIR_SCOPE);
   const svcUser = (await (
     await api('GET', `/clients/${svcDbId}/service-account-user`)
   ).json()) as { id: string };

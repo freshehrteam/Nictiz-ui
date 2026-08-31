@@ -13,14 +13,19 @@ import { describe, expect, it } from 'vitest';
 import { registerClients, type RegistrarConfig } from '../../scripts/register-clients';
 
 /** Minimal in-memory Keycloak admin API. */
-function fakeKeycloak(opts: { realmRoles?: string[] } = {}) {
+function fakeKeycloak(opts: { realmRoles?: string[]; clientScopes?: string[] } = {}) {
   const realmRoles = (opts.realmRoles ?? ['USER', 'ADMIN']).map((name, i) => ({
     id: `role-${i}`,
+    name,
+  }));
+  const clientScopes = (opts.clientScopes ?? ['openfhir.map', 'opt.r']).map((name, i) => ({
+    id: `scope-${i}`,
     name,
   }));
   const clients: Array<Record<string, any>> = [];
   const users: Array<Record<string, any>> = [];
   const mappers = new Map<string, Array<Record<string, any>>>();
+  const optionalScopes = new Map<string, Array<{ id: string; name: string }>>();
   const roleMappings = new Map<string, Array<{ id: string; name: string }>>();
   const passwords = new Map<string, string>();
   let nextId = 0;
@@ -70,6 +75,18 @@ function fakeKeycloak(opts: { realmRoles?: string[] } = {}) {
       mappers.set(match[1], list);
       return json(null, 201);
     }
+    if (sub === '/client-scopes' && method === 'GET') return json(clientScopes);
+    if ((match = sub.match(/^\/clients\/([^/]+)\/optional-client-scopes$/)) && method === 'GET') {
+      return json(optionalScopes.get(match[1]) ?? []);
+    }
+    if ((match = sub.match(/^\/clients\/([^/]+)\/optional-client-scopes\/([^/]+)$/)) && method === 'PUT') {
+      const scope = clientScopes.find((s) => s.id === match![2]);
+      if (!scope) return new Response('no scope', { status: 404 });
+      const list = optionalScopes.get(match[1]) ?? [];
+      list.push(scope);
+      optionalScopes.set(match[1], list);
+      return json(null, 204);
+    }
     if ((match = sub.match(/^\/clients\/([^/]+)\/service-account-user$/))) {
       const u = users.find((u) => u.serviceAccountOf === match![1]);
       return u ? json(u) : new Response('no svc user', { status: 404 });
@@ -100,7 +117,7 @@ function fakeKeycloak(opts: { realmRoles?: string[] } = {}) {
     return new Response(`unhandled ${method} ${sub}`, { status: 500 });
   }) as unknown as typeof fetch;
 
-  return { impl, clients, users, mappers, roleMappings, passwords };
+  return { impl, clients, users, mappers, optionalScopes, roleMappings, passwords };
 }
 
 const CFG: Omit<RegistrarConfig, 'fetchImpl'> = {
@@ -119,14 +136,20 @@ const CFG: Omit<RegistrarConfig, 'fetchImpl'> = {
 };
 
 describe('registerClients', () => {
-  it('creates both clients, the audience mapper, roles and the demo user', async () => {
+  it('creates both clients, the mappers, scope, roles and the demo user', async () => {
     const kc = fakeKeycloak();
     await registerClients({ ...CFG, fetchImpl: kc.impl });
 
     const svc = kc.clients.find((c) => c.clientId === 'nictiz-ui-svc')!;
     expect(svc.serviceAccountsEnabled).toBe(true);
     expect(svc.secret).toBe('svc-secret');
-    expect(kc.mappers.get(svc.id)![0].config['included.custom.audience']).toBe('oauth2-proxy');
+    const svcMappers = kc.mappers.get(svc.id)!;
+    expect(svcMappers.find((m) => m.name === 'oauth2-proxy-audience')!.config['included.custom.audience']).toBe('oauth2-proxy');
+    // tenant=freshehr: the protected openFHIR engine keys its store by this claim.
+    const tenant = svcMappers.find((m) => m.name === 'openfhir-tenant')!;
+    expect(tenant.config['claim.value']).toBe('freshehr');
+    // openfhir.map attached as an OPTIONAL scope (the BFF requests it via scope=).
+    expect(kc.optionalScopes.get(svc.id)!.map((s) => s.name)).toEqual(['openfhir.map']);
 
     const ui = kc.clients.find((c) => c.clientId === 'nictiz-ui')!;
     expect(ui.standardFlowEnabled).toBe(true);
@@ -149,9 +172,11 @@ describe('registerClients', () => {
     expect(kc.clients.filter((c) => c.clientId === 'nictiz-ui-svc')).toHaveLength(1);
     expect(kc.clients.filter((c) => c.clientId === 'nictiz-ui')).toHaveLength(1);
     expect(kc.users.filter((u) => u.username === 'demo')).toHaveLength(1);
-    // The mapper is not duplicated; the secret is overwritten (secret WINS).
+    // Mappers and the optional scope are not duplicated; the secret is
+    // overwritten (secret WINS).
     const svc = kc.clients.find((c) => c.clientId === 'nictiz-ui-svc')!;
-    expect(kc.mappers.get(svc.id)).toHaveLength(1);
+    expect(kc.mappers.get(svc.id)).toHaveLength(2);
+    expect(kc.optionalScopes.get(svc.id)).toHaveLength(1);
     expect(svc.secret).toBe('rotated');
     // Roles are not stacked twice either.
     const demo = kc.users.find((u) => u.username === 'demo')!;
@@ -171,6 +196,20 @@ describe('registerClients', () => {
     const kc = fakeKeycloak();
     await registerClients({ ...CFG, fetchImpl: kc.impl, demoUser: undefined });
     expect(kc.users.find((u) => u.username === 'demo')).toBeUndefined();
+  });
+
+  it('tolerates a stack realm without the openFHIR scopes (pre-native-OAuth stack)', async () => {
+    // Against an older stack the engine is unprotected, so the missing scope
+    // is harmless — registration must warn and continue, not half-register.
+    const kc = fakeKeycloak({ clientScopes: [] });
+    const warnings: string[] = [];
+    await registerClients({ ...CFG, fetchImpl: kc.impl, log: (m) => warnings.push(m) });
+
+    const svc = kc.clients.find((c) => c.clientId === 'nictiz-ui-svc')!;
+    expect(kc.optionalScopes.get(svc.id) ?? []).toHaveLength(0);
+    expect(warnings.some((w) => /WARNING.*openfhir\.map.*not found/.test(w))).toBe(true);
+    // Everything else still registered.
+    expect(kc.clients.find((c) => c.clientId === 'nictiz-ui')).toBeDefined();
   });
 
   it('fails loudly when the USER realm role is missing (wrong realm)', async () => {

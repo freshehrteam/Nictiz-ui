@@ -1,8 +1,10 @@
 /**
- * OAuth2 client_credentials token manager for the BFF→EHRbase hop.
+ * OAuth2 client_credentials token manager for the BFF's upstream hops
+ * (BFF→EHRbase and BFF→openFHIR).
  *
- * EHRbase validates Bearer tokens against the freshehr Keycloak realm
- * (SECURITY_AUTHTYPE=OAUTH); the BFF authenticates as the `nictiz-ui-svc`
+ * Both upstreams validate Bearer tokens against the freshehr Keycloak realm
+ * (EHRbase via SECURITY_AUTHTYPE=OAUTH, the openFHIR engine via
+ * openfhir.protected); the BFF authenticates as the `nictiz-ui-svc`
  * service account. Zero dependencies on purpose — Node 22's native fetch is
  * enough, and a new npm dependency would have to survive the image build's
  * devDependencies pruning (see the Dockerfile note in the README).
@@ -17,6 +19,12 @@ export interface TokenManagerOptions {
   tokenUrl: string;
   clientId: string;
   clientSecret: string;
+  /**
+   * Space-separated scopes to request. The openFHIR per-API scopes are
+   * OPTIONAL client scopes in the freshehr realm — they only enter the token
+   * when explicitly requested, so a caller that needs them must say so here.
+   */
+  scope?: string;
   /**
    * Seconds subtracted from `expires_in` when deciding staleness. A token used
    * at the very end of its lifetime can expire in flight to EHRbase; refreshing
@@ -64,6 +72,7 @@ export function createTokenManager(options: TokenManagerOptions): TokenManager {
         grant_type: 'client_credentials',
         client_id: clientId,
         client_secret: clientSecret,
+        ...(options.scope ? { scope: options.scope } : {}),
       }).toString(),
     });
 

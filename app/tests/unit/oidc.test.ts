@@ -58,6 +58,21 @@ describe('createTokenManager', () => {
     expect(params.get('client_secret')).toBe('s3cret');
   });
 
+  it('sends the configured scope, and omits the param when unset', async () => {
+    // The openFHIR per-API scopes are OPTIONAL client scopes — absent from the
+    // token unless requested, so forgetting the param presents as the engine
+    // 403ing every mapping call.
+    const withScope = fakeFetch([tokenResponse('tok-1')]);
+    await createTokenManager({ ...OPTS, scope: 'openfhir.map', fetchImpl: withScope.impl }).getToken();
+    const [, init] = withScope.mock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(new URLSearchParams(String(init.body)).get('scope')).toBe('openfhir.map');
+
+    const without = fakeFetch([tokenResponse('tok-1')]);
+    await createTokenManager({ ...OPTS, fetchImpl: without.impl }).getToken();
+    const [, init2] = without.mock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(new URLSearchParams(String(init2.body)).has('scope')).toBe(false);
+  });
+
   it('caches the token within its lifetime', async () => {
     let nowMs = 0;
     const kc = fakeFetch([tokenResponse('tok-1', 300), tokenResponse('tok-2', 300)]);
