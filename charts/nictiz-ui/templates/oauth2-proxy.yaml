@@ -1,0 +1,134 @@
+{{- if .Values.auth.oauth2Proxy.enabled }}
+{{- /*
+oauth2-proxy — the browser login for this host, in SESSION/COOKIE mode.
+
+ingress-nginx sends an auth-url subrequest here for every request to the main
+Ingress. No session cookie → 401, and the auth-signin annotation redirects the
+browser into /oauth2/start → Keycloak (realm freshehr) → /oauth2/callback.
+After login the proxy holds the session and answers each subrequest 202 with
+X-Auth-Request-User/Email, which the ingress forwards to the BFF — that is
+where per-user `composer` attribution comes from.
+
+Modelled on the health-stack chart's oauth2-proxy but deliberately SEPARATE:
+that instance is a Bearer-only validator (static://202, no set-xauthrequest)
+whose redirect URI lives on the stack host. Reusing it would break both hosts'
+login flows; each host owns its own browser flow.
+*/ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nictiz-ui.fullname" . }}-oauth2-proxy
+  labels:
+    {{- include "nictiz-ui.oauth2ProxyLabels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "nictiz-ui.oauth2ProxySelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "nictiz-ui.oauth2ProxyLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: oauth2-proxy
+          image: {{ .Values.auth.oauth2Proxy.image | quote }}
+          imagePullPolicy: {{ .Values.auth.oauth2Proxy.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 4180
+          env:
+            - name: OAUTH2_PROXY_PROVIDER
+              value: keycloak-oidc
+            # The PUBLIC canonical issuer on the health-stack host — discovery
+            # is fetched through the LB (hairpin), and tokens are only valid
+            # for the issuer that minted them. `required`: a missing value
+            # would otherwise surface only at login time, as an opaque error.
+            - name: OAUTH2_PROXY_OIDC_ISSUER_URL
+              value: {{ required "oidc.issuerUrl is required when auth.oauth2Proxy.enabled (the freshehr realm's public issuer on the health-stack host, e.g. https://<stack-host>/auth/realms/freshehr)" .Values.oidc.issuerUrl | quote }}
+            - name: OAUTH2_PROXY_CLIENT_ID
+              value: {{ .Values.auth.oauth2Proxy.clientId | quote }}
+            - name: OAUTH2_PROXY_REDIRECT_URL
+              value: {{ printf "https://%s/oauth2/callback" .Values.ingress.host | quote }}
+            # Session mode: hold the login in an encrypted cookie and answer
+            # the auth-url subrequests with the user's identity.
+            - name: OAUTH2_PROXY_SET_XAUTHREQUEST
+              value: "true"
+            - name: OAUTH2_PROXY_COOKIE_SECURE
+              value: "true"
+            - name: OAUTH2_PROXY_COOKIE_SAMESITE
+              value: lax
+            # LOAD-BEARING: must stay below the realm's 300 s access token
+            # lifespan — see values.yaml.
+            - name: OAUTH2_PROXY_COOKIE_REFRESH
+              value: {{ .Values.auth.oauth2Proxy.cookieRefresh | quote }}
+            # Keycloak is the only IdP; a "sign in with" interstitial would be
+            # an extra click that offers no choice.
+            - name: OAUTH2_PROXY_SKIP_PROVIDER_BUTTON
+              value: "true"
+            {{- if .Values.auth.oauth2Proxy.skipJwtBearerTokens }}
+            # Also accept a valid Bearer JWT in place of a session cookie
+            # (curl/CI smoke tests). Service-account tokens carry the
+            # oauth2-proxy audience, not this client's — hence the extra
+            # accepted audience below.
+            - name: OAUTH2_PROXY_SKIP_JWT_BEARER_TOKENS
+              value: "true"
+            - name: OAUTH2_PROXY_OIDC_EXTRA_AUDIENCES
+              value: oauth2-proxy
+            {{- end }}
+            - name: OAUTH2_PROXY_EMAIL_DOMAINS
+              value: "*"
+            # Human users may lack a verified email; the signature + issuer +
+            # audience checks are what gate access here.
+            - name: OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL
+              value: "true"
+            # auth_request-only: no real upstream behind the proxy.
+            - name: OAUTH2_PROXY_UPSTREAMS
+              value: static://202
+            - name: OAUTH2_PROXY_REVERSE_PROXY
+              value: "true"
+            - name: OAUTH2_PROXY_HTTP_ADDRESS
+              value: 0.0.0.0:4180
+          envFrom:
+            # OAUTH2_PROXY_CLIENT_SECRET + OAUTH2_PROXY_COOKIE_SECRET, owned by
+            # THIS chart; the registration Job sets the same client secret on
+            # the realm client, so the two cannot disagree.
+            - secretRef:
+                name: {{ .Values.auth.oauth2Proxy.secretName | quote }}
+          # Generous failureThreshold: startup hairpins OIDC discovery through
+          # the public LB, so the pod cannot go ready until Keycloak + DNS are
+          # reachable. It crash-loops harmlessly until then; k8s self-heals.
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          {{- with .Values.auth.oauth2Proxy.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nictiz-ui.fullname" . }}-oauth2-proxy
+  labels:
+    {{- include "nictiz-ui.oauth2ProxyLabels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "nictiz-ui.oauth2ProxySelectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.auth.oauth2Proxy.service.port }}
+      targetPort: http
+      protocol: TCP
+{{- end }}

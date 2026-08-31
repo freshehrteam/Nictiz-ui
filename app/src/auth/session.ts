@@ -2,21 +2,15 @@
  * The logged-in user.
  *
  * Identity is decided OUTSIDE this app. The deployed stack gates the whole host
- * at the ingress (nginx basic-auth), so by the time a request reaches the BFF it
- * has already been authenticated; the BFF then re-exposes whoever that was at
- * `GET /api/me`. This module's job is only to make that answer available
- * synchronously to the form layer.
+ * at the ingress (forward-auth to oauth2-proxy: anonymous browsers are sent to
+ * the Keycloak login), so by the time a request reaches the BFF it has already
+ * been authenticated and carries who the user is (`X-Auth-Request-User`); the
+ * BFF re-exposes that at `GET /api/me`. This module's job is only to make that
+ * answer available synchronously to the form layer.
  *
  * `resolveUser()` must be awaited once at startup, before any form renders.
  * Until it resolves — and in unit tests, which never call it — `currentUser()`
  * returns the fallback below, so nothing ever renders with an empty composer.
- *
- * Ingress basic-auth carries a shared credential, so the name it yields is a
- * deployment-wide identity rather than a per-clinician one. The header contract
- * (`X-Auth-Request-Email` / `X-Auth-Request-User`, which is what oauth2-proxy
- * and most OIDC forward-auth proxies emit) is already honoured server-side, so
- * putting a real IdP in front later starts producing real per-user composers
- * without a change here.
  *
  * `composer` and `context/start_time` are both MANDATORY at the COMPOSITION
  * root, and neither is a clinical judgement: the composer is whoever is logged

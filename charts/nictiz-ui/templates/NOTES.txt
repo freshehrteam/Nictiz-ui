@@ -8,25 +8,29 @@ Before it works, check these in order:
 1) DNS — {{ .Values.ingress.host }} must resolve to the hcloud load balancer IP:
      terraform -chdir=<stack>/terraform/envs/hetzner output load_balancer_ipv4
 
-{{ if .Values.auth.basicAuth.enabled }}
-2) Basic-auth Secret "{{ include "nictiz-ui.basicAuthSecretName" . }}" must exist in this namespace.
-{{- if not .Values.auth.basicAuth.create }}
-   This chart did NOT create it (auth.basicAuth.create=false, the safe default).
-   Create it now, or every request will 503:
+2) The health-stack release's Keycloak admin Secret must exist here — the
+   registration Job authenticates with it:
 
-     htpasswd -nbB <username> '<password>' > auth
-     kubectl create secret generic {{ include "nictiz-ui.basicAuthSecretName" . }} \
-       -n {{ .Release.Namespace }} --from-file=auth
-     rm auth
+     kubectl get secret {{ .Values.keycloak.registration.adminSecret }} -n {{ .Release.Namespace }}
 
-   Verify:  kubectl get secret {{ include "nictiz-ui.basicAuthSecretName" . }} -n {{ .Release.Namespace }}
-{{- else }}
-   ⚠ This chart rendered the Secret from values (auth.basicAuth.create=true).
-   The credential is in your values file and in the Helm release history.
-   Acceptable for a demo cluster; do not do this for anything real.
-{{- end }}
-{{ else }}
-2) ⚠ BASIC-AUTH IS DISABLED (auth.basicAuth.enabled=false).
+3) The registration Job must have succeeded — it creates/updates this app's
+   OIDC clients (+ demo user) in the {{ .Values.keycloak.realm }} realm on every
+   install and upgrade:
+
+     kubectl get job {{ include "nictiz-ui.fullname" . }}-register-clients -n {{ .Release.Namespace }}
+     kubectl logs job/{{ include "nictiz-ui.fullname" . }}-register-clients -n {{ .Release.Namespace }}
+
+   (On a fresh full-stack install it retries until Keycloak is up — a few
+   minutes of restarts is normal.)
+
+{{ if .Values.auth.oauth2Proxy.enabled -}}
+4) oidc.issuerUrl ({{ .Values.oidc.issuerUrl }}) must be the {{ .Values.keycloak.realm }} realm's
+   PUBLIC issuer on the health-stack host. The oauth2-proxy pod fetches OIDC
+   discovery from it through the LB at startup, so it cannot go ready until
+   Keycloak + DNS + TLS are up — a crash-looping proxy pod right after a fresh
+   install is normal for a few minutes.
+{{- else -}}
+4) ⚠ THE BROWSER LOGIN IS DISABLED (auth.oauth2Proxy.enabled=false).
    Nothing gates this host. The BFF applies no per-user access control, so
    anyone who reaches {{ .Values.ingress.host }} can read and write EVERY record
    in the CDR.
@@ -35,31 +39,41 @@ Before it works, check these in order:
    unreachable rather than exposed. That is the intended failure direction, but
    it does mean this configuration is not usable as-is.
 {{- end }}
-{{ end }}
-3) EHRbase credentials come from Secret "{{ .Values.ehrbase.auth.existingSecret }}", which is
-   owned by the health-stack release. It must be in THIS namespace:
+{{- end }}
 
-     kubectl get secret {{ .Values.ehrbase.auth.existingSecret }} -n {{ .Release.Namespace }}
-
-   Missing → the pod stays in CreateContainerConfigError.
-
-4) Watch it come up:
+5) Watch it come up:
 
      kubectl rollout status deploy/{{ include "nictiz-ui.fullname" . }} -n {{ .Release.Namespace }}
      kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "nictiz-ui.name" . }} -f
 
-5) Verify end-to-end (expect 401 without credentials, 200 with):
+6) Verify end-to-end:
 
-     curl -o /dev/null -w '%{http_code}\n' https://{{ .Values.ingress.host }}/api/health
-     curl -u <username> https://{{ .Values.ingress.host }}/api/health
+     curl -s -o /dev/null -w '%{http_code}\n' https://{{ .Values.ingress.host }}/api/health   # 302 → login
+     TOKEN=$(curl -sX POST <issuer>/protocol/openid-connect/token \
+       -d grant_type=client_credentials -d client_id=api-client \
+       -d client_secret=<terraform output kc_api_client_secret> | jq -r .access_token)
+     curl -H "Authorization: Bearer $TOKEN" https://{{ .Values.ingress.host }}/api/health     # 200
 
    /api/health reports whether the BFF can reach EHRbase and HAPI — that is the
-   check that tells you the two releases are actually wired together.
+   check that tells you the releases are actually wired together.
+{{- if .Values.keycloak.demoUser.enabled }}
+
+   Browser login: user "{{ .Values.keycloak.demoUser.username }}", password from
+
+     kubectl get secret {{ .Values.keycloak.demoUser.secretName }} -n {{ .Release.Namespace }} -o jsonpath='{.data.password}' | base64 -d
+{{- end }}
 
 {{- if .Values.auth.required }}
 
 NOTE: REQUIRE_AUTH is on, so the BFF rejects any request without a proxy
 identity. A direct `kubectl port-forward` to the Service will therefore 401 —
-that is deliberate, not a bug. Use `-H 'Authorization: Basic ...'` to test
-through the port-forward, or go through the ingress.
+that is deliberate, not a bug.
+
+The reliable way to test is THROUGH the ingress, which is what supplies that
+identity. Over a port-forward you must forge the header the BFF reads:
+
+    curl -H 'X-Auth-Request-User: tester' http://localhost:3001/api/health
+
+(That this forgery works at all from inside the cluster is exactly why the
+NetworkPolicy exists.)
 {{- end }}

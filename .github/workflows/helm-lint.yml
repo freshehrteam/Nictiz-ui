@@ -46,26 +46,59 @@ jobs:
           helm lint ${{ env.CHART_DIR }}
           helm lint ${{ env.CHART_DIR }} -f ${{ env.CHART_DIR }}/values-hetzner.yaml
 
+      # oidc.issuerUrl has no default on purpose (a wrong guess fails only at
+      # login time), so the default render must supply one.
       - name: Render (default values)
-        run: helm template nictiz-ui ${{ env.CHART_DIR }} -n health-stack > /dev/null
+        run: |
+          helm template nictiz-ui ${{ env.CHART_DIR }} -n health-stack \
+            --set-string oidc.issuerUrl=https://stack.example.com/auth/realms/freshehr > /dev/null
 
       - name: Render (hetzner values)
         run: |
           helm template nictiz-ui ${{ env.CHART_DIR }} -n health-stack \
             -f ${{ env.CHART_DIR }}/values-hetzner.yaml > /dev/null
 
-      # The htpasswd guard rails are the chart's only real logic, and both are
-      # fail-safe checks — assert they still FAIL, so a refactor cannot quietly
-      # turn "reject a plaintext password" into "accept it".
-      - name: Guard rails still reject bad basic-auth input
+      # The auth wiring is the chart's only real logic. These greps pin the
+      # invariants a refactor could quietly lose: the forward-auth annotations
+      # must be present (template-emitted — a values override must not be able
+      # to drop them), no basic-auth artifact may creep back in (the snippet
+      # relaxation it needed has been reverted cluster-wide), and the required
+      # guard on the issuer must still fail a blank value.
+      - name: Auth guard rails
         run: |
-          if helm template t ${{ env.CHART_DIR }} \
-               --set auth.basicAuth.create=true >/dev/null 2>&1; then
-            echo "::error::create=true with no htpasswd should have failed"; exit 1
+          RENDERED=$(helm template nictiz-ui ${{ env.CHART_DIR }} -n health-stack \
+            -f ${{ env.CHART_DIR }}/values-hetzner.yaml)
+
+          for must in "nginx.ingress.kubernetes.io/auth-url" \
+                      "nginx.ingress.kubernetes.io/auth-response-headers" \
+                      "OAUTH2_PROXY_SET_XAUTHREQUEST" \
+                      "register-clients"; do
+            if ! grep -q "$must" <<< "$RENDERED"; then
+              echo "::error::hetzner render is missing $must"; exit 1
+            fi
+          done
+
+          for banned in "auth-type: basic" "configuration-snippet"; do
+            if grep -q "$banned" <<< "$RENDERED"; then
+              echo "::error::hetzner render still contains '$banned' — basic auth is retired"; exit 1
+            fi
+          done
+
+          # Both Ingress objects (app + /oauth2) must publish the same host.
+          HOSTS=$(grep -c 'host: "nictiz-demo.freshehr.com"' <<< "$RENDERED")
+          INGRESSES=$(grep -c '^kind: Ingress' <<< "$RENDERED")
+          if [ "$INGRESSES" != "2" ]; then
+            echo "::error::expected 2 Ingress objects (app + /oauth2), got $INGRESSES"; exit 1
           fi
-          if helm template t ${{ env.CHART_DIR }} \
-               --set auth.basicAuth.create=true \
-               --set auth.basicAuth.htpasswd=plaintext >/dev/null 2>&1; then
-            echo "::error::create=true with a plaintext password should have failed"; exit 1
+          if [ "$HOSTS" -lt 2 ]; then
+            echo "::error::both Ingresses must publish nictiz-demo.freshehr.com (found $HOSTS rule hosts)"; exit 1
           fi
-          echo "Both guard rails rejected bad input, as intended."
+
+          # A blank issuer must fail the render, not ship a proxy that breaks
+          # only at login time.
+          if helm template t ${{ env.CHART_DIR }} \
+               --set-string oidc.issuerUrl="" >/dev/null 2>&1; then
+            echo "::error::blank oidc.issuerUrl should have failed the render"; exit 1
+          fi
+
+          echo "All auth guard rails hold."

@@ -67,6 +67,11 @@ ENV NODE_ENV=production
 COPY app/server ./server
 COPY --from=build /build/dist ./dist
 
+# scripts/ rides along for the Helm registration Job, which runs
+# scripts/register-clients.ts from THIS image — one implementation of the
+# Keycloak client registration for local dev and in-cluster alike.
+COPY app/scripts ./scripts
+
 # Served by /api/golden — the golden FLAT fixture. It lives at the repo root,
 # which is why the build context is the repo root and not app/.
 COPY fixtures ./fixtures

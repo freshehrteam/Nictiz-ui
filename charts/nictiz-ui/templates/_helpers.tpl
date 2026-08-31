@@ -52,9 +52,19 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{/*
-Basic-auth Secret name. Falls back to a release-derived name so the annotation
-and the rendered Secret can never disagree.
+oauth2-proxy labels. Its OWN name/selector pair — sharing the app's selector
+would put the proxy pod behind the BFF Service (and vice versa).
 */}}
-{{- define "nictiz-ui.basicAuthSecretName" -}}
-{{- .Values.auth.basicAuth.secretName | default (printf "%s-basic-auth" (include "nictiz-ui.fullname" .)) -}}
+{{- define "nictiz-ui.oauth2ProxySelectorLabels" -}}
+app.kubernetes.io/name: {{ include "nictiz-ui.name" . }}-oauth2-proxy
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+
+{{- define "nictiz-ui.oauth2ProxyLabels" -}}
+helm.sh/chart: {{ include "nictiz-ui.chart" . }}
+{{ include "nictiz-ui.oauth2ProxySelectorLabels" . }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/component: oauth2-proxy
+app.kubernetes.io/part-of: freshehr-open-health-stack
 {{- end -}}

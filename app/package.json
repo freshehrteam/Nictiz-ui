@@ -10,6 +10,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "seed": "tsx scripts/seed.ts",
+    "register": "tsx scripts/register-clients.ts",
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts",
     "test:e2e": "playwright test"

@@ -2,9 +2,10 @@
  * BFF for the Nictiz openEHR EMR.
  *
  * Mandatory, not a convenience. The stack configures no CORS anywhere, and
- * EHRbase is behind HTTP Basic auth that must never reach the browser. This
- * process is the only thing holding credentials, and it gives the SPA a stable
- * same-origin base URL for both back ends.
+ * EHRbase only answers OAuth2 Bearer tokens from the freshehr Keycloak realm —
+ * credentials that must never reach the browser. This process is the only
+ * thing holding the client secret, and it gives the SPA a stable same-origin
+ * base URL for both back ends.
  *
  * It fronts three servers:
  *   EHRbase 2.28  — compositions, EHRs, templates, AQL
@@ -12,14 +13,16 @@
  *   openFHIR      — FHIR Connect mapping (openEHR composition -> FHIR Bundle)
  *
  * SECURITY: this process performs NO authentication of its own. Every request
- * runs as one shared EHRbase credential, so anything that can reach this port
- * can read and write every record.
+ * runs as one shared service account (`nictiz-ui-svc`, client_credentials), so
+ * anything that can reach this port can read and write every record.
  *
  * That is safe only because of where it is deployed. In the Hetzner deployment
- * the ingress gates the entire host with nginx basic-auth, so an unauthenticated
- * request never arrives. Locally there is no gate at all — do not expose this
- * port beyond localhost without one. `requireUpstreamAuth` below turns the
- * assumption into an enforced invariant rather than a comment. See README.
+ * the ingress gates the entire host through oauth2-proxy (Keycloak login), so
+ * an unauthenticated request never arrives — and the proxy forwards who the
+ * user is as X-Auth-Request-User. Locally there is no gate at all — do not
+ * expose this port beyond localhost without one. `requireUpstreamAuth` below
+ * turns the assumption into an enforced invariant rather than a comment. See
+ * README.
  */
 
 import express from 'express';
@@ -30,6 +33,7 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
 import { callerIdentity, type HeaderBag } from './identity';
+import { createTokenManager } from './oidc';
 import { identifyBundleWithPatient } from './bundle-link';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -39,8 +43,14 @@ const EHRBASE_BASE =
   process.env.EHRBASE_BASE ?? 'http://localhost:8082/ehrbase/rest/openehr/v1';
 const FHIR_BASE = process.env.FHIR_BASE ?? 'http://localhost:8080/fhir';
 const OPENFHIR_BASE = process.env.OPENFHIR_BASE ?? 'http://localhost:8083';
-const AUTH_USER = process.env.EHRBASE_AUTH_USER ?? 'ehrbase-user';
-const AUTH_PASSWORD = process.env.EHRBASE_AUTH_PASSWORD ?? 'SuperSecretPassword';
+// Keycloak client_credentials for the BFF→EHRbase hop. The dev fallbacks are
+// the fixed values baked into the compose stack's committed realm import, so a
+// bare `npm run dev` against the local stack works with no .env at all.
+const OIDC_TOKEN_URL =
+  process.env.OIDC_TOKEN_URL ??
+  'http://localhost:8081/auth/realms/freshehr/protocol/openid-connect/token';
+const OIDC_CLIENT_ID = process.env.OIDC_CLIENT_ID ?? 'nictiz-ui-svc';
+const OIDC_CLIENT_SECRET = process.env.OIDC_CLIENT_SECRET ?? 'dev-nictiz-ui-svc-secret';
 const PORT = Number(process.env.PORT ?? 3001);
 const ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:5173';
 
@@ -78,39 +88,23 @@ const REQUIRE_AUTH = /^(1|true|yes)$/i.test(process.env.REQUIRE_AUTH ?? '');
 /**
  * Header naming the authenticated user, set by the proxy.
  *
- * nginx basic-auth exposes the verified username as `$remote_user`, which the
- * ingress forwards as `X-Auth-Request-User` — the same header oauth2-proxy and
- * most OIDC forward-auth proxies emit. Keeping that contract means swapping
- * basic-auth for a real IdP needs no change in this file.
+ * oauth2-proxy answers the ingress's auth-url subrequest with
+ * `X-Auth-Request-User` / `X-Auth-Request-Email` (OAUTH2_PROXY_SET_XAUTHREQUEST),
+ * and the ingress copies them onto the proxied request via
+ * auth-response-headers. Most OIDC forward-auth proxies speak the same
+ * convention, which is why the names are configurable rather than hardcoded.
  */
 const AUTH_USER_HEADER = (process.env.AUTH_USER_HEADER ?? 'x-auth-request-user').toLowerCase();
 const AUTH_EMAIL_HEADER = (process.env.AUTH_EMAIL_HEADER ?? 'x-auth-request-email').toLowerCase();
 
 /**
- * Whether to read the caller's identity from the inbound `Authorization` header.
+ * Display name for the UNAUTHENTICATED local-dev case only.
  *
- * ingress-nginx's basic-auth verifies credentials and then passes the original
- * `Authorization` header through to the upstream unchanged. It does NOT emit an
- * identity header of its own: forwarding `$remote_user` requires the
- * `auth-snippet` annotation, which since v1.9 needs `allow-snippet-annotations`
- * flipped on AND `annotations-risk-level: Critical` — two CLUSTER-WIDE
- * relaxations that apply to every Ingress in the cluster, not just this one.
- * Weakening a shared controller to move one username is the wrong trade.
- *
- * So the username is parsed from `Authorization` instead. This is a READ of a
- * credential nginx has ALREADY verified — the request cannot reach here without
- * having passed basic-auth — so it is an identity lookup, not an auth decision.
- * The password half is deliberately never examined.
- */
-const TRUST_BASIC_AUTH = /^(1|true|yes)$/i.test(process.env.TRUST_BASIC_AUTH ?? '');
-
-/**
- * Display name when the proxy authenticated someone but told us no name.
- *
- * Ingress basic-auth is a SHARED credential, so this is a deployment identity,
- * not a person. It is deliberately not a plausible human name: a composition in
- * the CDR should not look like it was recorded by a specific clinician when the
- * system cannot actually tell who was at the keyboard.
+ * Deployed, the edge oauth2-proxy always forwards a per-user identity and this
+ * value is never consulted. Locally there is no proxy, so /api/me falls back to
+ * it. It is deliberately not a plausible human name: a composition in the CDR
+ * should not look like it was recorded by a specific clinician when the system
+ * cannot actually tell who was at the keyboard.
  */
 const DEFAULT_USER_NAME = process.env.DEFAULT_USER_NAME ?? 'Demo User';
 
@@ -121,8 +115,36 @@ const DEFAULT_USER_NAME = process.env.DEFAULT_USER_NAME ?? 'Demo User';
  */
 const FHIR_NAMESPACE = 'fhir';
 
-const authHeader =
-  'Basic ' + Buffer.from(`${AUTH_USER}:${AUTH_PASSWORD}`).toString('base64');
+const tokens = createTokenManager({
+  tokenUrl: OIDC_TOKEN_URL,
+  clientId: OIDC_CLIENT_ID,
+  clientSecret: OIDC_CLIENT_SECRET,
+});
+
+/**
+ * fetch against EHRbase as the service account, retrying exactly ONCE on 401.
+ *
+ * A 401 with a token the cache believed valid means clock drift, a Keycloak
+ * restart, or a revoked session — all settled by one fresh token. More retries
+ * would only hammer a genuinely broken auth config with the same failure.
+ */
+async function ehrbaseFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const request = (token: string) =>
+    fetch(url, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        ...(init.headers ?? {}),
+      },
+    });
+
+  const upstream = await request(await tokens.getToken());
+  if (upstream.status !== 401) return upstream;
+
+  tokens.invalidate();
+  return request(await tokens.getToken());
+}
 
 const app = express();
 
@@ -156,11 +178,10 @@ app.get('/healthz', (_req, res) => res.json({ status: 'ok' }));
 
 /** Binds this process's header configuration to the shared resolver. */
 function identityOf(req: express.Request): string | null {
-  return callerIdentity(
-    req.headers as HeaderBag,
-    { user: AUTH_USER_HEADER, email: AUTH_EMAIL_HEADER },
-    TRUST_BASIC_AUTH,
-  );
+  return callerIdentity(req.headers as HeaderBag, {
+    user: AUTH_USER_HEADER,
+    email: AUTH_EMAIL_HEADER,
+  });
 }
 
 /**
@@ -240,14 +261,7 @@ async function forward(
   init: RequestInit = {},
 ): Promise<void> {
   try {
-    const upstream = await fetch(url, {
-      ...init,
-      headers: {
-        Authorization: authHeader,
-        Accept: 'application/json',
-        ...(init.headers ?? {}),
-      },
-    });
+    const upstream = await ehrbaseFetch(url, init);
 
     const body = await upstream.text();
     res.status(upstream.status);
@@ -255,15 +269,25 @@ async function forward(
     res.send(body);
   } catch (err) {
     // Stack down is the common case — say so plainly instead of a bare 500.
+    // A token-fetch failure surfaces here too, hence the second half of the hint.
     res.status(502).json({
       error: 'Cannot reach EHRbase',
       detail: (err as Error).message,
-      hint: `Is the stack up? Expected EHRbase at ${EHRBASE_BASE}`,
+      hint:
+        `Is the stack up? Expected EHRbase at ${EHRBASE_BASE} — ` +
+        `or is Keycloak unreachable at ${OIDC_TOKEN_URL}?`,
     });
   }
 }
 
-/** FHIR is unauthenticated in this stack, so it gets its own forwarder. */
+/**
+ * FHIR is unauthenticated in this stack, so it gets its own forwarder.
+ *
+ * `Cache-Control: no-cache` because HAPI reuses cached search results for
+ * identical queries (default window ~60s): without it, a patient list fetched
+ * right after a create is answered from the cache and omits the new patient.
+ * Harmless on reads and writes, so it is set for every forwarded request.
+ */
 async function forwardFhir(
   res: express.Response,
   url: string,
@@ -272,7 +296,11 @@ async function forwardFhir(
   try {
     const upstream = await fetch(url, {
       ...init,
-      headers: { Accept: 'application/fhir+json', ...(init.headers ?? {}) },
+      headers: {
+        Accept: 'application/fhir+json',
+        'Cache-Control': 'no-cache',
+        ...(init.headers ?? {}),
+      },
     });
     const body = await upstream.text();
     res.status(upstream.status);
@@ -290,8 +318,8 @@ async function forwardFhir(
 /**
  * openFHIR forwarder.
  *
- * Separate from `forward()` for two reasons. It must NOT inject EHRbase's Basic
- * auth — openFHIR has no auth and would reject the header — and, more
+ * Separate from `forward()` for two reasons. It must NOT inject EHRbase's
+ * Bearer token — openFHIR is unauthenticated in-cluster — and, more
  * importantly, **openFHIR answers errors in plain text**, not JSON: the engine
  * does `ResponseEntity.badRequest().body(e.getMessage())`, so a mapping failure
  * arrives as a bare sentence. Passing that through verbatim would make the
@@ -331,14 +359,7 @@ async function forwardOpenFhir(
 // --- EHRbase helpers --------------------------------------------------------
 
 async function ehrbase(path: string, query: Record<string, string> = {}, init: RequestInit = {}) {
-  return fetch(ehrbaseUrl(path, query), {
-    ...init,
-    headers: {
-      Authorization: authHeader,
-      Accept: 'application/json',
-      ...(init.headers ?? {}),
-    },
-  });
+  return ehrbaseFetch(ehrbaseUrl(path, query), init);
 }
 
 async function listTemplateIds(): Promise<string[]> {
@@ -390,20 +411,19 @@ async function countOf(q: string): Promise<number> {
  * Who the proxy says is calling. The SPA reads this once at startup and uses it
  * for `composer` on every composition.
  *
- * With ingress basic-auth the username is a shared account, so this is the
- * deployment's identity rather than an individual's — `DEFAULT_USER_NAME`
- * exists to make that legible in the CDR instead of inventing a person. When a
- * real IdP replaces basic-auth it forwards the same headers with per-user
- * values and this endpoint starts returning real clinicians unchanged.
+ * oauth2-proxy forwards a real per-user identity, so the name IS the person at
+ * the keyboard: preferred_username when the proxy sends it (it does, with
+ * SET_XAUTHREQUEST), else the identity header itself. `DEFAULT_USER_NAME` is
+ * only the unauthenticated local-dev fallback, where there is no proxy at all.
  */
 app.get('/api/me', (req, res) => {
   const id = identityOf(req) ?? '';
+  const rawPreferred = req.headers['x-auth-request-preferred-username'];
+  const preferred = (Array.isArray(rawPreferred) ? rawPreferred[0] : rawPreferred)?.trim();
 
   res.json({
     id: id || 'anonymous',
-    // A bare basic-auth username ("demo") is a login handle, not a display
-    // name; showing it as the composer would misrepresent it as a person.
-    name: id ? (DEFAULT_USER_NAME || id) : DEFAULT_USER_NAME,
+    name: (id && (preferred || id)) || DEFAULT_USER_NAME,
     authenticated: Boolean(id),
   });
 });
@@ -470,7 +490,8 @@ app.get('/api/stats', async (_req, res) => {
   let patients = 0;
   try {
     const upstream = await fetch(fhirUrl('Patient', { _summary: 'count' }), {
-      headers: { Accept: 'application/fhir+json' },
+      // no-cache: HAPI caches _summary=count, so the tile lags creates/deletes.
+      headers: { Accept: 'application/fhir+json', 'Cache-Control': 'no-cache' },
     });
     if (upstream.ok) patients = Number((await upstream.json())?.total ?? 0);
   } catch {
@@ -1251,12 +1272,11 @@ app.listen(PORT, () => {
   console.log(`[bff] EHRbase -> ${EHRBASE_BASE}`);
   console.log(`[bff] FHIR    -> ${FHIR_BASE}`);
   console.log(`[bff] openFHIR-> ${OPENFHIR_BASE}`);
+  console.log(`[bff] OIDC    -> ${OIDC_TOKEN_URL} (client ${OIDC_CLIENT_ID})`);
   if (STATIC_DIR) console.log(`[bff] SPA     -> ${resolve(STATIC_DIR)}`);
   console.log(
     `[bff] auth    -> ${
-      REQUIRE_AUTH
-        ? `REQUIRED (header${TRUST_BASIC_AUTH ? ' or basic' : ''})`
-        : 'NOT ENFORCED (local dev only)'
+      REQUIRE_AUTH ? 'REQUIRED (proxy identity header)' : 'NOT ENFORCED (local dev only)'
     }`,
   );
 });

@@ -5,7 +5,8 @@ Restricts who may open a connection to this pod.
 The BFF trusts the identity its proxy asserts — that is inherent to any
 forward-auth design, and it is why `requireUpstreamAuth` alone is not the whole
 story: a caller INSIDE the cluster that can reach port 3001 directly can set
-`X-Auth-Request-User` itself and be believed, bypassing basic-auth entirely.
+`X-Auth-Request-User` itself and be believed, bypassing the Keycloak login
+entirely.
 
 The ingress path is not the risk (nginx is the only route in from outside). The
 risk is lateral: another workload in the cluster, or a `kubectl port-forward`
@@ -39,4 +40,31 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.service.targetPort }}
+{{- if .Values.auth.oauth2Proxy.enabled }}
+---
+{{/*
+Same restriction for the oauth2-proxy pod. Less load-bearing than the BFF's —
+the proxy authenticates rather than trusts — but a session-holding auth
+component reachable from every workload in the cluster is needless surface.
+Only ingress-nginx talks to it (auth-url subrequests + the /oauth2 paths).
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "nictiz-ui.fullname" . }}-oauth2-proxy
+  labels:
+    {{- include "nictiz-ui.oauth2ProxyLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "nictiz-ui.oauth2ProxySelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- toYaml .Values.networkPolicy.allowFrom | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: 4180
+{{- end }}
 {{- end }}

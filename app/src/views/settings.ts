@@ -3,7 +3,7 @@
  *
  * Also the place where the two things a reader must not have to discover for
  * themselves are stated plainly: that the demo patients are fictional, and that
- * this BFF has no user authentication.
+ * this BFF applies no per-user access control of its own.
  */
 
 import { LitElement, html, nothing } from 'lit';
@@ -183,13 +183,13 @@ export class EpsSettings extends LitElement {
           <div class="card-head"><h3>Security</h3></div>
           <div class="card-body">
             <div class="message error" style="margin:0">
-              <strong>There is no per-user authentication.</strong> The BFF holds one shared EHRbase
-              credential and applies no per-user access control, so anyone who gets past the gate can
-              read and write every record. Deployed, that gate is a single shared login at the
-              ingress; locally there is none at all. Either way nothing records who was at the
-              keyboard &mdash; every composition is filed under
-              <code>${currentUser().name}</code>. Real per-user authentication and authorisation
-              must be in place before this carries real patient data.
+              <strong>There is no per-user authorisation.</strong> The BFF talks to EHRbase as one
+              shared service account and applies no per-user access control, so anyone who gets past
+              the gate can read and write every record. Deployed, that gate is the Keycloak login at
+              the ingress and compositions are filed under whoever logged in
+              (currently <code>${currentUser().name}</code>); locally there is no gate at all.
+              Per-user authorisation and an audit trail must be in place before this carries real
+              patient data.
             </div>
           </div>
         </div>

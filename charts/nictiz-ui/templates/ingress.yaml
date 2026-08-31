@@ -3,10 +3,10 @@
 The UI's own Ingress, on its OWN host.
 
 Separate from the health-stack Ingress on purpose. That one publishes /fhir,
-/ehrbase and /openfhir — raw, unauthenticated back-end APIs. This host serves
-the EMR and is gated by basic-auth. Sharing a host would mean either leaving the
-back-end paths ungated on an authenticated host, or gating them and breaking
-the openFHIR interceptor's server-to-server calls.
+/ehrbase and /openfhir — back-end APIs gated for Bearer tokens. This host
+serves the EMR and is gated by a browser login (forward-auth to the chart's
+own session-mode oauth2-proxy). Sharing a host would mean one oauth2-proxy
+serving two contradictory flows.
 
 `/` catches everything: the SPA, its assets, and /api. That is the whole point
 of serving them from one process — one origin, one auth boundary, no CORS.
@@ -21,14 +21,22 @@ metadata:
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
-    {{- if .Values.auth.basicAuth.enabled }}
+    {{- if .Values.auth.oauth2Proxy.enabled }}
     # ── The access control ────────────────────────────────────────────────
-    # nginx verifies credentials against the htpasswd Secret before proxying,
-    # so an unauthenticated request never reaches the BFF — which is what makes
-    # it safe for the BFF to hold a single shared EHRbase credential.
-    nginx.ingress.kubernetes.io/auth-type: basic
-    nginx.ingress.kubernetes.io/auth-secret: {{ include "nictiz-ui.basicAuthSecretName" . | quote }}
-    nginx.ingress.kubernetes.io/auth-realm: {{ .Values.auth.basicAuth.realm | quote }}
+    # nginx asks the chart's oauth2-proxy about every request (auth_request
+    # subrequest); no session → the browser is redirected into the Keycloak
+    # login, and after it the verified identity is copied onto the proxied
+    # request. So an unauthenticated request never reaches the BFF — which is
+    # what makes it safe for the BFF to hold a single shared EHRbase service
+    # account.
+    #
+    # Emitted by the TEMPLATE, not values.annotations, on purpose: an
+    # environment values file that sets `ingress.annotations` REPLACES the
+    # default map wholesale, and these three must not be droppable by accident
+    # — losing auth-url would publish the CDR.
+    nginx.ingress.kubernetes.io/auth-url: "http://{{ include "nictiz-ui.fullname" . }}-oauth2-proxy.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.auth.oauth2Proxy.service.port }}/oauth2/auth"
+    nginx.ingress.kubernetes.io/auth-signin: "https://$host/oauth2/start?rd=$escaped_request_uri"
+    nginx.ingress.kubernetes.io/auth-response-headers: "X-Auth-Request-User, X-Auth-Request-Email, X-Auth-Request-Preferred-Username"
     {{- end }}
     {{- if .Values.ingress.tls.enabled }}
     cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer | quote }}
@@ -53,4 +61,44 @@ spec:
                 name: {{ include "nictiz-ui.fullname" . }}
                 port:
                   number: {{ .Values.service.port }}
+{{- if .Values.auth.oauth2Proxy.enabled }}
+---
+{{/*
+Second Ingress, same host: the oauth2-proxy's own endpoints (/oauth2/start,
+/oauth2/callback, /oauth2/sign_out). A SEPARATE object because annotations are
+per-Ingress and these paths must NOT carry the auth-url gate — the login flow
+cannot itself require being logged in. Mirrors the stack's health-stack-auth
+split.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "nictiz-ui.fullname" . }}-oauth2
+  labels:
+    {{- include "nictiz-ui.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.ingress.tls.enabled }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer | quote }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /oauth2
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "nictiz-ui.fullname" . }}-oauth2-proxy
+                port:
+                  number: {{ .Values.auth.oauth2Proxy.service.port }}
+{{- end }}
 {{- end }}

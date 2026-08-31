@@ -12,13 +12,17 @@ hand-written forms** ("Track B"). The evaluation and its defect catalogue live a
 
 ## Running it
 
-Needs Node 20+ and the local stack (EHRbase on `:8082`, HAPI FHIR on `:8080`).
+Needs Node 20+ and the local stack (EHRbase on `:8082`, HAPI FHIR on `:8080`,
+Keycloak on `:8081` — the BFF fetches its EHRbase tokens there, as the
+`nictiz-ui-svc` client).
 
 ```bash
 cp .env.example .env          # defaults match the local stack
 cd app && npm install
 npm ls @shoelace-style/shoelace   # must show exactly one copy
 
+npm run register              # once per fresh stack — registers this app's
+                              # OIDC clients in the local Keycloak realm
 npm run dev                   # BFF :3001 + Vite :5173
 npm run seed                  # once — creates the demo patients
 ```
@@ -28,6 +32,7 @@ Then open http://localhost:5173.
 | Command | What it does |
 |---|---|
 | `npm run dev` | BFF and Vite together |
+| `npm run register` | Registers `nictiz-ui-svc`/`nictiz-ui` + the demo user in the local Keycloak (idempotent; the stack repo stays agnostic of this app) |
 | `npm run seed` | Creates 6 demo patients, each with a linked EHR and one composition |
 | `npm test` | Unit tests — no backend needed |
 | `npm run test:e2e` | Browser tests — needs the stack up and seeded |
@@ -37,30 +42,34 @@ Then open http://localhost:5173.
 
 ## Security — read before deploying
 
-**The application performs no user authentication of its own.** The BFF holds
-one shared EHRbase credential and applies no per-user access control. Whoever
-gets past the gate can read and write every record in the CDR, and every
-composition is attributed to the same composer — there is no audit of who did
-what.
+**The application performs no user authentication of its own.** The BFF talks
+to EHRbase as one shared service account (`nictiz-ui-svc`, OAuth2
+`client_credentials` against the freshehr Keycloak realm) and applies no
+per-user access control. Whoever gets past the gate can read and write every
+record in the CDR.
 
 Two different postures follow from that:
 
 **Locally** there is no gate at all. Anything that can reach port 3001 has full
-access. Do not expose that port beyond localhost.
+access. Do not expose that port beyond localhost. (Browser SSO also does not
+work locally — the compose stack pins Keycloak's issuer in-network
+(`KC_HOSTNAME`), a documented stack limitation — so `/api/me` reports the
+anonymous "Demo User" fallback. Exercise the identity path directly:
+`curl -H 'x-auth-request-user: alice' localhost:3001/api/me`.)
 
 **Deployed** (see [Deploying to Hetzner](#deploying-to-hetzner)) the gate is the
-ingress: nginx basic-auth on the app's own hostname, checked before a request
-reaches the BFF. The BFF then refuses anything that did not come through it
+ingress: every request is checked against the chart's session-mode oauth2-proxy
+(`auth-url` subrequest); an anonymous browser is redirected into the Keycloak
+login (realm `freshehr`), and the verified identity is forwarded to the BFF as
+`X-Auth-Request-User`. The BFF refuses anything that did not come through it
 (`REQUIRE_AUTH`), so a misconfigured ingress or a direct pod connection fails
 closed instead of quietly serving the CDR.
 
-That is a **shared login, not per-user identity**. It keeps the public internet
-out, which is what it is for. It does not tell you who was at the keyboard, so
-`composer` is a deployment identity ("Demo User") rather than a clinician. Real
-per-user authentication and authorisation — an OIDC proxy in front, which the
-BFF already reads identity headers from — is still required before this touches
-real patient data. The Settings view states the same thing in the UI so it
-cannot be overlooked.
+That IS **per-user identity**: `composer` records the person who logged in.
+What is still missing before this touches real patient data is per-user
+*authorisation* (everyone with a realm account has the same full access) and an
+audit trail. The Settings view states the same thing in the UI so it cannot be
+overlooked.
 
 Demo patients created by `npm run seed` are fictional. They carry the FHIR tag
 `data-origin = demo` and use BSNs from the reserved `999…` test range.
@@ -73,7 +82,9 @@ The app runs **alongside** the `freshehr-open-health-stack` deployment: the same
 k3s cluster on hcloud, the same `health-stack` namespace, its own Helm release.
 
 Two repositories, two releases, deliberately. They version and deploy
-independently; what couples them is one Secret, referenced rather than copied.
+independently; what couples them is the shared Keycloak realm — this release
+registers its own clients in it via the admin API, so the stack repo carries
+nothing nictiz-ui-specific.
 
 ```
                     hcloud load balancer
@@ -83,17 +94,29 @@ independently; what couples them is one Secret, referenced rather than copied.
       ┌──────────────────────┴───────────────────────┐
       │                                              │
   health.<domain>                          nictiz-demo.<domain>
-  /fhir /ehrbase /openfhir                 /  (SPA + /api)
-  no auth                                  basic-auth
+  /fhir /openfhir → Bearer (oauth2-proxy)  /  (SPA + /api) → Keycloak login
+  /ehrbase → EHRbase validates natively    /oauth2/* (the login flow itself)
+  /auth    → Keycloak (public)                       │
       │                                              │
   hapi · ehrbase · openfhir  ◄── in-cluster ──  nictiz-ui (SPA + BFF)
 ```
 
-Separate hostnames on purpose: the health-stack host publishes raw, unauthenticated
-back-end APIs, and the openFHIR interceptor calls them server-to-server. Gating
-that host would break those calls; sharing a host would leave them ungated on an
-authenticated one. The BFF reaches all three over in-cluster Service DNS, so its
-traffic never passes back through the gate.
+Separate hostnames on purpose, and the reason is **which kind of caller** each
+host serves. The health-stack host exposes the raw back-end APIs to *machines*
+(Bearer JWTs from the realm's service-account clients, validated by the stack's
+Bearer-only oauth2-proxy). `nictiz-demo` serves *humans*: a session-mode
+oauth2-proxy owns the browser login for this host. Both flows live in one realm
+— one set of users, one place to rotate secrets — but each host runs the proxy
+mode its callers need.
+
+The BFF is unaffected by either gate: it reaches `ehrbase`, `hapi`, `openfhir`
+and `keycloak` over in-cluster Service DNS, and edge auth applies only to
+traffic arriving through the ingress. The same is true of the openFHIR
+interceptor's server-to-server calls.
+
+> Scripting against either host needs a Bearer token from the realm:
+> `make token` in the stack repo, or the `client_credentials` flow with
+> `terraform output -raw kc_api_client_secret`.
 
 ### One-time setup
 
@@ -107,14 +130,12 @@ terraform -chdir=<stack>/terraform/envs/hetzner output load_balancer_ipv4
 # → A record: nictiz-demo.<domain>
 ```
 
-**3. Create the basic-auth Secret.** This is the only thing between the internet
-and the CDR, so it is created out-of-band rather than from a values file:
-
-```bash
-htpasswd -nbB <username> '<password>' > auth   # -B = bcrypt
-kubectl create secret generic nictiz-ui-basic-auth -n health-stack --from-file=auth
-rm auth
-```
+**3. Make sure the stack is deployed.** That is the whole requirement: this
+chart generates its own client secrets and a post-install Job registers its
+OIDC clients + the demo user in the freshehr realm through Keycloak's admin
+API (credentials from the stack's `keycloak-secret`). The stack repo carries
+nothing nictiz-ui-specific — see "How registration works" in
+[`charts/nictiz-ui/README.md`](charts/nictiz-ui/README.md).
 
 ### Install
 
@@ -127,17 +148,22 @@ helm upgrade --install nictiz-ui charts/nictiz-ui \
 ```
 
 The namespace **must** be the health-stack one: the BFF resolves `ehrbase`,
-`hapi` and `openfhir` by bare Service name, and reads the EHRbase password from
-that release's `ehrbase-secret`. Both are namespace-local.
+`hapi`, `openfhir` and `keycloak` by bare Service name, and the registration
+Job reads the Keycloak admin credentials from that release's
+`keycloak-secret`. Both are namespace-local.
 
 ### Verify
 
 ```bash
 kubectl rollout status deploy/nictiz-ui -n health-stack
 
-curl -o /dev/null -w '%{http_code}\n' https://nictiz-demo.<domain>/api/health   # 401
-curl -u <username> https://nictiz-demo.<domain>/api/health                       # 200
+curl -s -o /dev/null -w '%{http_code}\n' https://nictiz-demo.<domain>/            # 302 → /oauth2/start
+TOKEN=$(cd <stack>/docker && make -s token)   # or any api-client client_credentials token
+curl -H "Authorization: Bearer $TOKEN" https://nictiz-demo.<domain>/api/health     # 200
 ```
+
+In the browser: log in as `demo` — password from
+`kubectl get secret nictiz-ui-demo-user -n health-stack -o jsonpath='{.data.password}' | base64 -d`.
 
 `/api/health` reports whether the BFF can reach EHRbase and HAPI — the check that
 confirms the two releases are actually wired together.
@@ -145,31 +171,45 @@ confirms the two releases are actually wired together.
 ### Bootstrapping the template
 
 An empty CDR has no template, so the form has nothing to render. Upload the OPT
-and register it with openFHIR — and check what is already registered first:
-openFHIR keys mappers by archetype **globally**, so EPS and IPS mappers for the
-same archetype collide, and `tofhir` then returns 200 with an empty Bundle.
+and register it with openFHIR. From the stack repo, both steps are:
+
+```bash
+make template     # uploads every OPT in docker/openfhir/bootstrap into EHRbase
+make bootstrap    # makes openFHIR re-scan that dir for mappings
+```
+
+The stack ships the **EPS** set only (`EPS Patient Summary`), which is the
+template `src/forms/registry.ts` has a form for, so a clean bootstrap needs no
+further care.
+
+**Check what is already registered if the CDR is not fresh.** openFHIR keys
+mappers by archetype **globally**, so EPS and IPS mappers for the same archetype
+collide — five are shared. A CDR that already carries IPS mappers (or a reused
+Postgres volume) will keep them, and `tofhir` then returns 200 with an empty
+Bundle: a save that looks successful and produces no clinical resources. Confirm
+the returned Bundle has more than one entry before believing the path works.
 
 ### How the auth actually fits together
 
 | Layer | Does what | Fails how |
 |---|---|---|
-| ingress-nginx | Verifies basic-auth against the htpasswd Secret | 401 before the BFF is reached |
+| ingress-nginx `auth-url` → oauth2-proxy | Sends anonymous browsers to the Keycloak login; verifies the session per request | 302 to login before the BFF is reached |
 | BFF `REQUIRE_AUTH` | Rejects requests with no proxy identity | 401 — a direct pod hit cannot bypass the gate |
-| NetworkPolicy | Only ingress-nginx may open a connection to the pod | Lateral in-cluster access is refused |
+| BFF → EHRbase | Bearer token as `nictiz-ui-svc` (`client_credentials`) | 502 with a Keycloak hint when tokens cannot be fetched |
+| NetworkPolicy | Only ingress-nginx may open a connection to the pods | Lateral in-cluster access is refused |
 
 The three are layered because the BFF *trusts* the identity its proxy asserts —
 inherent to forward-auth. `REQUIRE_AUTH` alone would still believe a forged
 header from inside the cluster; the NetworkPolicy is what makes "came through
 the ingress" true rather than assumed. k3s enforces NetworkPolicy out of the box.
 
-`/healthz` sits deliberately outside the guard: kubelet probes are not
-authenticated callers, and gating them would keep the Deployment from ever going
-ready.
+`/healthz` sits deliberately outside the guard: kubelet probes hit the pod
+directly and are unaffected by edge auth. Externally the path IS gated — an
+uptime monitor on it must send a Bearer token or treat the 302 as "up".
 
-**Migrating to real per-user identity** means putting an OIDC proxy
-(oauth2-proxy) in front and setting `auth.basicAuth.enabled=false`. The BFF
-already prefers `X-Auth-Request-User` / `X-Auth-Request-Email` over the basic
-credential, so `composer` starts recording real clinicians with no code change.
+**Per-user identity is done**: oauth2-proxy forwards who logged in, and
+`composer` records that person on every composition. What remains is per-user
+*authorisation* and an audit trail (see Known limitations).
 
 ---
 
@@ -200,8 +240,8 @@ fixtures/                 committed web templates (both formats — see
                           "Mandatory fields") + golden FLAT composition
 ```
 
-**The BFF is mandatory.** The stack configures no CORS anywhere, and EHRbase's
-Basic auth must never reach the browser.
+**The BFF is mandatory.** The stack configures no CORS anywhere, and the
+EHRbase service-account credential must never reach the browser.
 
 **Light DOM is mandatory.** Every component uses
 `createRenderRoot() { return this }`, because inside a Lit 3 shadow root
@@ -433,7 +473,8 @@ found by probing it and both worked around in the BFF:
 
 ## Known limitations
 
-- **No user authentication** (above). The single most important one.
+- **No per-user authorisation or audit trail** (above). Login is per-user
+  (Keycloak), but every account has the same full access to every record.
 - **Composition scope.** The form covers Allergies, Problems, Medical Devices
   and History of Procedures — the four sections this template actually has. The
   visual mockup shows Medications and Vital Signs; `EPS Patient Summary`

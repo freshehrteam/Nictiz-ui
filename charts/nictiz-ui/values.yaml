@@ -3,8 +3,13 @@
 # ----------------------------------------------------------------------------
 # Deployed as its own Helm release, into the SAME namespace as the health-stack
 # release. Same-namespace is not cosmetic: the BFF reaches EHRbase/HAPI/openFHIR
-# over their in-cluster Service names, and it consumes the EHRbase API password
-# from a Secret that the health-stack release owns.
+# over their in-cluster Service names, and the registration Job reads the
+# Keycloak admin credentials from that release's keycloak-secret.
+#
+# The stack repo stays agnostic of this app: THIS chart generates its own
+# client secrets (sticky across upgrades via lookup) and a post-install/
+# post-upgrade Job registers the OIDC clients + demo user in the freshehr
+# realm through Keycloak's admin API.
 #
 #   helm upgrade --install nictiz-ui charts/nictiz-ui \
 #     -n health-stack \
@@ -34,8 +39,8 @@ service:
 # ── Upstreams ────────────────────────────────────────────────────────────────
 # In-cluster Service DNS, NOT the public ingress. Two reasons: the traffic never
 # leaves the cluster (no TLS termination, no LB hop), and it does not pass back
-# through the basic-auth gate — which would reject the BFF's own server-to-server
-# calls, since those carry EHRbase credentials rather than a browser's.
+# through the edge auth gates — the BFF authenticates to EHRbase itself, with a
+# Bearer token from the service-account client below.
 #
 # NOTE openfhir has NO /openfhir prefix here. The engine serves at its root; the
 # prefix exists only as an ingress rewrite for browser-facing traffic.
@@ -44,24 +49,38 @@ upstreams:
   fhirBase: http://hapi:8080/fhir
   openfhirBase: http://openfhir:8080
 
-# ── EHRbase credentials ──────────────────────────────────────────────────────
-# The BFF holds ONE shared EHRbase credential (it applies no per-user access
-# control of its own — see the Security note in the app README).
+# ── BFF→EHRbase credentials (OIDC client_credentials) ────────────────────────
+# EHRbase validates Bearer tokens natively (SECURITY_AUTHTYPE=OAUTH in the
+# health-stack release); the BFF authenticates as the `nictiz-ui-svc` service
+# account in the freshehr Keycloak realm. Still ONE shared credential — the BFF
+# applies no per-user access control of its own (see the app README).
 #
-# `existingSecret` is the supported path and the reason the two charts stay
-# decoupled: Terraform generates the EHRbase API password once, the health-stack
-# release renders it into its `ehrbase-secret`, and this release READS the same
-# key. Copying the value into this chart's own values would create a second
-# source of truth that silently drifts the moment the password rotates — and the
-# symptom would be every BFF call 401ing against a CDR that is working fine.
-ehrbase:
-  auth:
-    # Secret owned by the health-stack release, in the same namespace.
-    existingSecret: ehrbase-secret
-    # Keys within it. These match what health-stack's secrets.yaml renders from
-    # Terraform's `secrets.values.ehrbase.SECURITY_AUTH*`.
-    userKey: SECURITY_AUTHUSER
-    passwordKey: SECURITY_AUTHPASSWORD
+# THIS chart owns the Secret: the value is generated at install (sticky across
+# upgrades via lookup) and the registration Job sets the very same value on
+# the realm client — one source of truth, and the realm and the consumer can
+# never disagree.
+oidc:
+  # Token endpoint — the IN-CLUSTER Keycloak Service (mirrors how hapi-svc
+  # fetches its tokens): the hop never leaves the cluster and works before DNS
+  # or TLS exist.
+  tokenUrl: http://keycloak:8080/auth/realms/freshehr/protocol/openid-connect/token
+  # PUBLIC canonical issuer of the freshehr realm — lives on the health-stack
+  # host (e.g. https://nictiz.open-fhir.com/auth/realms/freshehr), NOT this
+  # chart's ingress.host. Required when auth.oauth2Proxy.enabled: the proxy's
+  # OIDC discovery + the browser redirect both go through it, and tokens are
+  # only valid for the issuer that minted them. No default on purpose — a wrong
+  # guess here fails only at login time, with an opaque error.
+  issuerUrl: ""
+  # The client this release registers for its BFF.
+  clientId: nictiz-ui-svc
+  # Rendered by this chart; the registration Job pushes the same value into
+  # the realm.
+  secretName: nictiz-ui-oidc
+  clientIdKey: OIDC_CLIENT_ID
+  clientSecretKey: OIDC_CLIENT_SECRET
+  # Leave empty to auto-generate (recommended). Set only for throwaway
+  # clusters where a fixed value is worth having it in a values file.
+  clientSecret: ""
 
 # ── Authentication ───────────────────────────────────────────────────────────
 # The BFF performs NO authentication itself. The ingress does, and the BFF then
@@ -75,55 +94,102 @@ auth:
   # that this means unauthenticated read/write access to every record.
   required: true
 
-  # Headers naming the authenticated user. These are oauth2-proxy's defaults and
-  # are checked FIRST, so putting a real IdP in front later starts producing
-  # per-user identity with no application change.
-  #
-  # ingress-nginx's basic-auth does not set them — forwarding $remote_user needs
-  # the auth-snippet annotation, which since v1.9 requires enabling
-  # allow-snippet-annotations AND annotations-risk-level=Critical cluster-wide.
-  # Rather than weaken the shared ingress controller for every tenant, the BFF
-  # reads the username from the Authorization header nginx already forwards
-  # (see TRUST_BASIC_AUTH in the Deployment).
+  # Headers naming the authenticated user. oauth2-proxy emits them on the
+  # /oauth2/auth response (OAUTH2_PROXY_SET_XAUTHREQUEST) and the Ingress's
+  # auth-response-headers annotation copies them onto the proxied request.
   userHeader: x-auth-request-user
   emailHeader: x-auth-request-email
 
-  # Display name written to `composer|name` on every composition.
-  #
-  # With ingress basic-auth this is a SHARED login, so it is a deployment
-  # identity and not a person. It is deliberately not a plausible clinician
-  # name: a record in the CDR must not look like it was authored by a specific
-  # human when the system cannot tell who was at the keyboard. Replace this with
-  # per-user identity (an IdP) before anything clinical depends on attribution.
+  # Display name written to `composer|name` when NO proxy identity arrived.
+  # With oauth2-proxy in front that never happens — every request carries the
+  # logged-in user, who becomes the composer. This remains only as the
+  # local-dev fallback, and is deliberately not a plausible clinician name.
   defaultUserName: Demo User
 
-  # ── Ingress basic-auth ─────────────────────────────────────────────────────
-  # nginx checks credentials against an htpasswd Secret before proxying.
-  basicAuth:
+  # ── Edge login (ingress-nginx auth-url → oauth2-proxy, session mode) ───────
+  # A UI-scoped oauth2-proxy Deployment gates the whole host: the ingress sends
+  # an auth-url subrequest per request; without a session cookie the browser is
+  # redirected to Keycloak (realm freshehr), and after login the proxy holds
+  # the session and answers 202 + X-Auth-Request-User/Email.
+  #
+  # Deliberately NOT the health-stack's oauth2-proxy: that one is Bearer-only
+  # (no session, no set-xauthrequest) and its redirect URI lives on the stack
+  # host. This one owns the browser flow for THIS host.
+  oauth2Proxy:
     enabled: true
 
-    # Name of the Secret holding the htpasswd file (key: `auth`).
-    secretName: nictiz-ui-basic-auth
+    # Match the health-stack chart's oauth2-proxy version.
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.3
+    imagePullPolicy: IfNotPresent
 
-    # Whether THIS chart creates that Secret. Default false: it holds a
-    # credential, and a password living in a values file tends to end up in git.
-    # Create it out-of-band instead:
-    #
-    #   htpasswd -nbB demo 'a-strong-password' > auth
-    #   kubectl create secret generic nictiz-ui-basic-auth \
-    #     -n health-stack --from-file=auth
-    #   rm auth
-    #
-    # Note -B (bcrypt): nginx also accepts weaker hashes, but they are trivially
-    # crackable if the Secret ever leaks.
-    create: false
+    # The standard-flow client this release registers for its browser login
+    # (redirect URI https://<ingress.host>/oauth2/callback — derived from
+    # ingress.host by the registration Job, so the two cannot drift).
+    clientId: nictiz-ui
 
-    # Only read when create=true — for a throwaway demo cluster. Must already be
-    # htpasswd-formatted (user:$2y$...). A plaintext password here does not
-    # work; nginx compares against a hash.
-    htpasswd: ""
+    # Rendered by this chart (OAUTH2_PROXY_CLIENT_SECRET +
+    # OAUTH2_PROXY_COOKIE_SECRET); the registration Job pushes the client
+    # secret into the realm.
+    secretName: nictiz-ui-oauth2-proxy
+    # Leave empty to auto-generate (recommended).
+    clientSecret: ""
+    # Leave empty to auto-generate. If set, must be exactly 16, 24 or 32
+    # characters (oauth2-proxy cookie encryption).
+    cookieSecret: ""
 
-    realm: "Nictiz openEHR EMR"
+    service:
+      port: 4180
+
+    # LOAD-BEARING: must stay BELOW the realm's accessTokenLifespan (300 s).
+    # The session cookie outlives the access token inside it; refreshing every
+    # 4 m keeps that token fresh. Set this ≥ 5 m and /oauth2/auth starts
+    # failing once the token expires — nginx then 302s the SPA's background
+    # API fetches, which surfaces as opaque JSON-parse errors, not as a login
+    # screen.
+    cookieRefresh: 4m
+
+    # Also accept a valid Bearer JWT instead of a session cookie, so
+    # `make token`-style curl smoke tests work against this host too.
+    skipJwtBearerTokens: true
+
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+
+# ── Keycloak client self-registration ────────────────────────────────────────
+# A post-install/post-upgrade Job registers this app's OIDC clients + the demo
+# user in the stack's freshehr realm via the admin API. Idempotent
+# (create-or-update), which also makes it the upgrade path — Keycloak's
+# --import-realm never updates an existing realm.
+#
+# TRADE-OFF, accepted deliberately: the Job runs with the Keycloak BOOTSTRAP
+# ADMIN credentials (read from the health-stack release's keycloak-secret).
+# That is the price of keeping app-specific realm content out of the stack
+# repo. The Job is short-lived and hook-deleted; the admin credentials never
+# reach the serving pods.
+keycloak:
+  # In-cluster Keycloak, including the /auth prefix.
+  url: http://keycloak:8080/auth
+  realm: freshehr
+  registration:
+    enabled: true
+    # The health-stack release's Keycloak workload Secret (bootstrap admin).
+    adminSecret: keycloak-secret
+    adminUserKey: KC_BOOTSTRAP_ADMIN_USERNAME
+    adminPasswordKey: KC_BOOTSTRAP_ADMIN_PASSWORD
+  # The demo human user for browser login. Password is generated (sticky) into
+  # its own Secret; read it with:
+  #   kubectl get secret <secretName> -o jsonpath='{.data.password}' | base64 -d
+  demoUser:
+    enabled: true
+    username: demo
+    secretName: nictiz-ui-demo-user
+    # Leave empty to auto-generate (recommended).
+    password: ""
 
 # ── NetworkPolicy ────────────────────────────────────────────────────────────
 # Restricts pod ingress to the ingress-nginx controller.
@@ -131,7 +197,7 @@ auth:
 # This is what backs the BFF's trust in the proxy's identity header. Without it,
 # any workload in the cluster (or anyone who can `kubectl port-forward`) can
 # reach port 3001 directly, set X-Auth-Request-User to whatever it likes, and be
-# believed — basic-auth bypassed entirely. The BFF cannot defend against that on
+# believed — the Keycloak login bypassed entirely. The BFF cannot defend against that on
 # its own: trusting the proxy is inherent to forward-auth, so the network has to
 # be what makes "came through the proxy" true.
 #

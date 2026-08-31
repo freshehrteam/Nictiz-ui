@@ -1,0 +1,119 @@
+{{- if .Values.keycloak.registration.enabled }}
+{{- /*
+Registers this app's OIDC clients + demo user in the stack's freshehr realm.
+
+Runs AFTER install/upgrade (the chart's Secrets must exist first — the Job
+pushes their values into the realm) and is re-run on every upgrade: the script
+is create-or-update, so it doubles as the migration path for realms that
+predate a client (Keycloak's --import-realm never updates an existing realm).
+
+Runs THIS chart's app image: scripts/register-clients.ts is the same code
+`npm run register` uses against the local compose stack — one implementation.
+
+The generous backoffLimit matters on a fresh full-stack install: Keycloak may
+still be booting/importing when this fires. The script itself polls the realm
+(KC_WAIT_*) before doing anything.
+*/ -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "nictiz-ui.fullname" . }}-register-clients
+  labels:
+    {{- include "nictiz-ui.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        {{- include "nictiz-ui.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: register-clients
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command: ["./node_modules/.bin/tsx", "scripts/register-clients.ts"]
+          env:
+            - name: KC_URL
+              value: {{ .Values.keycloak.url | quote }}
+            - name: KC_REALM
+              value: {{ .Values.keycloak.realm | quote }}
+            # Bootstrap admin — owned by the health-stack release. The accepted
+            # trade-off of self-registration; see values.yaml.
+            - name: KC_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.keycloak.registration.adminSecret | quote }}
+                  key: {{ .Values.keycloak.registration.adminUserKey | quote }}
+            - name: KC_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.keycloak.registration.adminSecret | quote }}
+                  key: {{ .Values.keycloak.registration.adminPasswordKey | quote }}
+            # The redirect URI derives from ingress.host — the single source of
+            # truth for this chart's public origin.
+            - name: UI_ORIGIN
+              value: {{ printf "https://%s" .Values.ingress.host | quote }}
+            - name: OIDC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.oidc.secretName | quote }}
+                  key: {{ .Values.oidc.clientIdKey | quote }}
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.oidc.secretName | quote }}
+                  key: {{ .Values.oidc.clientSecretKey | quote }}
+            {{- if .Values.auth.oauth2Proxy.enabled }}
+            - name: OAUTH2_CLIENT_ID
+              value: {{ .Values.auth.oauth2Proxy.clientId | quote }}
+            - name: OAUTH2_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.oauth2Proxy.secretName | quote }}
+                  key: OAUTH2_PROXY_CLIENT_SECRET
+            {{- end }}
+            {{- if .Values.keycloak.demoUser.enabled }}
+            - name: DEMO_ENABLED
+              value: "true"
+            - name: DEMO_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.keycloak.demoUser.secretName | quote }}
+                  key: username
+            - name: DEMO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.keycloak.demoUser.secretName | quote }}
+                  key: password
+            {{- else }}
+            - name: DEMO_ENABLED
+              value: "false"
+            {{- end }}
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            # tsx needs a writable cache dir under the read-only root fs, same
+            # as the app container.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

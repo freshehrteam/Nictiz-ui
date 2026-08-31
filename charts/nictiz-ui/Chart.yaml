@@ -20,6 +20,7 @@ keywords:
 annotations:
   # Deliberately a SEPARATE release from health-stack, not a subchart: the two
   # live in different repositories and release independently. What couples them
-  # is the EHRbase credential, which is why `ehrbase.existingSecret` points at a
-  # Secret the health-stack release already owns rather than re-declaring it.
+  # is the shared Keycloak realm — this chart registers its own OIDC clients in
+  # it (via the admin credentials in the health-stack release's
+  # keycloak-secret), so the stack chart stays agnostic of this app.
   freshehr.io/companion-chart: health-stack

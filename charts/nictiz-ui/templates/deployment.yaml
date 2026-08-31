@@ -57,19 +57,22 @@ spec:
             - name: OPENFHIR_BASE
               value: {{ .Values.upstreams.openfhirBase | quote }}
 
-            # EHRbase Basic auth, read from the Secret the health-stack release
-            # owns. Referenced rather than copied so there is exactly one source
-            # of truth for this password across the two releases.
-            - name: EHRBASE_AUTH_USER
+            # BFF→EHRbase: client_credentials against the in-cluster Keycloak.
+            # The client id + secret come from this chart's own Secret; the
+            # registration Job pushes the same value into the realm, so the
+            # two cannot disagree.
+            - name: OIDC_TOKEN_URL
+              value: {{ .Values.oidc.tokenUrl | quote }}
+            - name: OIDC_CLIENT_ID
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.ehrbase.auth.existingSecret | quote }}
-                  key: {{ .Values.ehrbase.auth.userKey | quote }}
-            - name: EHRBASE_AUTH_PASSWORD
+                  name: {{ .Values.oidc.secretName | quote }}
+                  key: {{ .Values.oidc.clientIdKey | quote }}
+            - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.ehrbase.auth.existingSecret | quote }}
-                  key: {{ .Values.ehrbase.auth.passwordKey | quote }}
+                  name: {{ .Values.oidc.secretName | quote }}
+                  key: {{ .Values.oidc.clientSecretKey | quote }}
 
             # Auth posture. REQUIRE_AUTH makes the BFF reject anything that did
             # not arrive through the authenticating ingress.
@@ -81,12 +84,6 @@ spec:
               value: {{ .Values.auth.emailHeader | quote }}
             - name: DEFAULT_USER_NAME
               value: {{ .Values.auth.defaultUserName | quote }}
-            # Derive the caller's identity from the Authorization header that
-            # ingress-nginx's basic-auth forwards. Only meaningful when
-            # basic-auth is the gate; an OIDC proxy sends a real identity
-            # header, which takes precedence in the BFF regardless.
-            - name: TRUST_BASIC_AUTH
-              value: {{ .Values.auth.basicAuth.enabled | quote }}
 
             # Serving the SPA from this same process is what makes /api
             # same-origin, which is why no CORS configuration is needed here.

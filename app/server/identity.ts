@@ -6,10 +6,12 @@
  * either direction is costly — too strict and the app is unreachable, too loose
  * and the CDR is open.
  *
- * What this module does NOT do is authenticate. Credentials are verified by the
- * ingress before a request reaches this process; everything here READS an
- * already-verified identity. Re-checking the password would mean this service
- * holding the htpasswd file, which is precisely the coupling the ingress gate
+ * What this module does NOT do is authenticate. Credentials are verified at the
+ * edge — oauth2-proxy answers the ingress's auth-url subrequest after a
+ * Keycloak login (or a valid Bearer JWT), and the ingress forwards the verified
+ * identity as X-Auth-Request-User / X-Auth-Request-Email. Everything here READS
+ * that already-verified identity. Re-checking the credential would mean this
+ * service talking OIDC itself, which is precisely the coupling the edge proxy
  * exists to avoid.
  */
 
@@ -30,61 +32,19 @@ function firstValue(raw: string | string[] | undefined): string | undefined {
 }
 
 /**
- * The username from a Basic `Authorization` header, or null.
- *
- * Deliberately ignores the password half. nginx has already checked it; this is
- * an identity lookup, not an auth decision.
- */
-export function basicAuthUser(header: string | string[] | undefined): string | null {
-  const value = firstValue(header);
-  if (!value) return null;
-
-  // `Basic` per RFC 7617, case-insensitive, followed by the token.
-  const match = /^basic\s+(\S+)\s*$/i.exec(value);
-  if (!match) return null;
-
-  const token = match[1];
-
-  /**
-   * Node's base64 decoder is lenient: it SKIPS invalid characters rather than
-   * throwing, so `Buffer.from(garbage, 'base64')` returns a partial buffer and
-   * a wrong username instead of an error. Validating the alphabet first is what
-   * makes a malformed header fail closed.
-   */
-  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(token)) return null;
-
-  let decoded: string;
-  try {
-    decoded = Buffer.from(token, 'base64').toString('utf8');
-  } catch {
-    return null;
-  }
-
-  // A credential with no ':' is malformed per RFC 7617. Treating the whole
-  // string as a username would invent an identity out of a broken header.
-  const separator = decoded.indexOf(':');
-  if (separator === -1) return null;
-
-  const user = decoded.slice(0, separator).trim();
-  return user || null;
-}
-
-/**
  * Who the authenticating proxy says this request is from, or null if it did not
  * come through one.
  *
- * Header identity wins over Basic. If an OIDC proxy is in front it forwards a
- * real per-user identity, which is strictly better than a shared basic-auth
- * login — and that migration should not require an application change.
+ * A blank or whitespace-only header counts as NO identity: an empty forwarded
+ * header means the proxy did not identify anyone, and accepting it would
+ * authenticate the request as the empty user. A blank user header falls
+ * through to the email header for the same reason — blank is absence, not a
+ * value.
  */
-export function callerIdentity(
-  headers: HeaderBag,
-  names: IdentityHeaders,
-  trustBasicAuth: boolean,
-): string | null {
-  const fromHeader = firstValue(headers[names.user]) ?? firstValue(headers[names.email]);
-  if (fromHeader?.trim()) return fromHeader.trim();
-
-  if (trustBasicAuth) return basicAuthUser(headers.authorization);
+export function callerIdentity(headers: HeaderBag, names: IdentityHeaders): string | null {
+  const user = firstValue(headers[names.user])?.trim();
+  if (user) return user;
+  const email = firstValue(headers[names.email])?.trim();
+  if (email) return email;
   return null;
 }
