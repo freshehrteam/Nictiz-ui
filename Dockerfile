@@ -29,6 +29,8 @@ RUN npm ci
 COPY app/tsconfig.json app/vite.config.ts ./
 COPY app/index.html ./
 COPY app/src ./src
+# public/ is copied verbatim into dist/ by vite build — the favicon lives here.
+COPY app/public ./public
 
 # `npm run build` is tsc && vite build — the typecheck is deliberately inside
 # the image build, so a type error fails the build rather than shipping.
