@@ -7,7 +7,8 @@
  * failed silently when it was missing, and nine of the ten defects behind them
  * produce no error at all.
  *
- * Full detail: the medblocks-ui-evaluation repository/docs/TRACK-B-GAPS-AND-WORKAROUNDS.md
+ * Full detail: the Medblocks UI evaluation's TRACK-B-GAPS-AND-WORKAROUNDS.md
+ * (separate, private evaluation repository).
  */
 
 import { normalizeExport, ensureRepeatableOccurrences, ROOT } from './flat';

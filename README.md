@@ -5,8 +5,8 @@ composition browser grouped by template, a hand-written Medblocks form for the
 **EPS Patient Summary** template, and a technical/settings view.
 
 Built on the decision reached in a dedicated evaluation: **Medblocks UI with
-hand-written forms** ("Track B"). The evaluation and its defect catalogue live at
-`(private evaluation repository)`.
+hand-written forms** ("Track B"). The evaluation and its defect catalogue live
+in a separate (private) evaluation repository.
 
 ---
 
@@ -79,7 +79,9 @@ Demo patients created by `npm run seed` are fictional. They carry the FHIR tag
 
 ## Deploying to Hetzner
 
-The app runs **alongside** the `freshehr-open-health-stack` deployment: the same
+The app runs **alongside** the
+[`freshehr-open-health-stack`](https://github.com/freshehr/freshehr-open-health-stack)
+deployment (the "stack repo" referenced throughout this README): the same
 k3s cluster on hcloud, the same `health-stack` namespace, its own Helm release.
 
 Two repositories, two releases, deliberately. They version and deploy

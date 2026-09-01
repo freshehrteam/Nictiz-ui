@@ -1,92 +1,96 @@
-# Build & push the nictiz-ui container image to Docker Hub.
+# DISABLED before repository transfer: this workflow references the previous
+# publisher's registry org and repo secrets and would fail in a new org.
+# Re-enable by uncommenting and updating IMAGE_ORG / secrets / hostnames.
 #
-#   openfhir/nictiz-ui  = the SPA (built by Vite) + the BFF, in one image.
+# # Build & push the nictiz-ui container image to Docker Hub.
+# #
+# #   openfhir/nictiz-ui  = the SPA (built by Vite) + the BFF, in one image.
+# #
+# # The Helm chart in charts/nictiz-ui references it via `image.repository` /
+# # `image.tag`. Mirrors the health-stack repo's build-images.yml, including its
+# # tagging scheme, so the two halves of the deployment are pinned the same way.
+# #
+# # Requires two repo secrets: DOCKERHUB_USERNAME and DOCKERHUB_TOKEN (an access
+# # token from hub.docker.com → Account Settings → Personal access tokens, with
+# # Read/Write). Without them the job fails at the login step.
+# name: build-image
 #
-# The Helm chart in charts/nictiz-ui references it via `image.repository` /
-# `image.tag`. Mirrors the health-stack repo's build-images.yml, including its
-# tagging scheme, so the two halves of the deployment are pinned the same way.
+# on:
+#   push:
+#     branches: [main]
+#     tags: ["v*"]
+#     paths:
+#       - "app/**"
+#       - "fixtures/**"
+#       - "Dockerfile"
+#       - ".dockerignore"
+#       - ".github/workflows/build-image.yml"
+#   pull_request:
+#     paths:
+#       - "app/**"
+#       - "Dockerfile"
+#       - ".github/workflows/build-image.yml"
+#   workflow_dispatch:
 #
-# Requires two repo secrets: DOCKERHUB_USERNAME and DOCKERHUB_TOKEN (an access
-# token from hub.docker.com → Account Settings → Personal access tokens, with
-# Read/Write). Without them the job fails at the login step.
-name: build-image
-
-on:
-  push:
-    branches: [main]
-    tags: ["v*"]
-    paths:
-      - "app/**"
-      - "fixtures/**"
-      - "Dockerfile"
-      - ".dockerignore"
-      - ".github/workflows/build-image.yml"
-  pull_request:
-    paths:
-      - "app/**"
-      - "Dockerfile"
-      - ".github/workflows/build-image.yml"
-  workflow_dispatch:
-
-env:
-  REGISTRY: docker.io
-  IMAGE_ORG: openfhir
-
-jobs:
-  # Tests gate the image. The build itself runs `tsc` (so type errors already
-  # fail it), but nothing in the Docker build executes the unit tests — and the
-  # composer/identity wiring they cover is exactly the kind of thing that fails
-  # silently in production rather than loudly at build time.
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: app/package-lock.json
-      - run: npm ci
-        working-directory: app
-      - run: npm test
-        working-directory: app
-      - run: npm run build
-        working-directory: app
-
-  image:
-    needs: test
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-
-      # Pull requests build but do NOT push: a PR from a fork cannot access the
-      # registry secrets, and an unreviewed branch should not publish a tag that
-      # a cluster might pull.
-      - if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_ORG }}/nictiz-ui
-          tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=sha
-
-      - uses: docker/build-push-action@v6
-        with:
-          # Repo root, not app/ — the image needs fixtures/ from above app/.
-          context: .
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+# env:
+#   REGISTRY: docker.io
+#   IMAGE_ORG: openfhir
+#
+# jobs:
+#   # Tests gate the image. The build itself runs `tsc` (so type errors already
+#   # fail it), but nothing in the Docker build executes the unit tests — and the
+#   # composer/identity wiring they cover is exactly the kind of thing that fails
+#   # silently in production rather than loudly at build time.
+#   test:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-node@v4
+#         with:
+#           node-version: "22"
+#           cache: npm
+#           cache-dependency-path: app/package-lock.json
+#       - run: npm ci
+#         working-directory: app
+#       - run: npm test
+#         working-directory: app
+#       - run: npm run build
+#         working-directory: app
+#
+#   image:
+#     needs: test
+#     runs-on: ubuntu-latest
+#     permissions:
+#       contents: read
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: docker/setup-buildx-action@v3
+#
+#       # Pull requests build but do NOT push: a PR from a fork cannot access the
+#       # registry secrets, and an unreviewed branch should not publish a tag that
+#       # a cluster might pull.
+#       - if: github.event_name != 'pull_request'
+#         uses: docker/login-action@v3
+#         with:
+#           registry: ${{ env.REGISTRY }}
+#           username: ${{ secrets.DOCKERHUB_USERNAME }}
+#           password: ${{ secrets.DOCKERHUB_TOKEN }}
+#
+#       - id: meta
+#         uses: docker/metadata-action@v5
+#         with:
+#           images: ${{ env.IMAGE_ORG }}/nictiz-ui
+#           tags: |
+#             type=ref,event=branch
+#             type=semver,pattern={{version}}
+#             type=sha
+#
+#       - uses: docker/build-push-action@v6
+#         with:
+#           # Repo root, not app/ — the image needs fixtures/ from above app/.
+#           context: .
+#           push: ${{ github.event_name != 'pull_request' }}
+#           tags: ${{ steps.meta.outputs.tags }}
+#           labels: ${{ steps.meta.outputs.labels }}
+#           cache-from: type=gha
+#           cache-to: type=gha,mode=max

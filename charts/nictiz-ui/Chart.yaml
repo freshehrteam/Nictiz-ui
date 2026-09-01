@@ -17,6 +17,12 @@ keywords:
   - ehrbase
   - nictiz
 
+home: https://github.com/freshehr/freshehr-nictiz-ui
+sources:
+  - https://github.com/freshehr/freshehr-nictiz-ui
+maintainers:
+  - name: freshEHR
+
 annotations:
   # Deliberately a SEPARATE release from health-stack, not a subchart: the two
   # live in different repositories and release independently. What couples them
