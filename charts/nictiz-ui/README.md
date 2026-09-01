@@ -105,7 +105,7 @@ generates its secrets and the Job registers the clients.
 ### `oidc.issuerUrl`
 
 Deliberately has no default. It is the freshehr realm's public issuer on the
-health-stack host (e.g. `https://nictiz.open-fhir.com/auth/realms/freshehr`) —
+health-stack host (e.g. `https://health.example.com/auth/realms/freshehr`) —
 the UI's oauth2-proxy fetches OIDC discovery from it and sends the browser
 there to log in. A wrong value fails only at login time with an opaque error,
 so the chart refuses to render without one (`required`), and CI asserts that
@@ -146,43 +146,6 @@ returns them, and every composition's `composer` is the actual person at the
 keyboard.
 
 `/healthz` is served outside the guard: kubelet probes hit the pod directly and
-are unaffected by edge auth. Externally the path IS edge-gated now — an uptime
+are unaffected by edge auth. Externally the path IS edge-gated — an uptime
 monitor pointed at `https://<host>/healthz` must either send a Bearer token or
 watch the 302 as its "up" signal.
-
-## Migrating a live cluster off basic auth
-
-Nothing is up to preserve: against the upgraded stack the old chart cannot even
-schedule (its `secretKeyRef` points at `ehrbase-secret` keys that no longer
-exist). Order still matters:
-
-1. **Stack repo:** merge + `terraform apply` in `terraform/envs/hetzner` —
-   ingress-nginx redeploys with the snippet relaxation reverted (the
-   cluster-wide CVE-2021-25742 hardening is restored).
-2. **DNS:** `nictiz-demo.freshehr.com` → the LB IP (cert-manager issues the
-   TLS cert on first Ingress deploy).
-3. **Build + push the UI image** (CI on main → new tag).
-4. **Deploy:** `helm upgrade --install nictiz-ui charts/nictiz-ui -n
-   health-stack -f charts/nictiz-ui/values-hetzner.yaml --set image.tag=<new>`.
-   The hook Job registers the clients + demo user in the live realm — no
-   manual Keycloak work.
-5. **Delete the orphaned htpasswd Secret:**
-   `kubectl delete secret nictiz-ui-basic-auth -n health-stack`.
-6. **Verify:**
-
-   ```bash
-   curl -si https://nictiz-demo.freshehr.com/             # 302 → /oauth2/start?rd=...
-   curl -si https://nictiz-demo.freshehr.com/oauth2/start # 302 → <issuer>/...client_id=nictiz-ui
-   curl -si https://nictiz-demo.freshehr.com/api/me       # 302 (edge-gated; nginx never reaches the BFF)
-   curl -s -H "Authorization: Bearer $TOKEN" https://nictiz-demo.freshehr.com/api/me
-   # → 200 {"authenticated":true}
-   ```
-
-   Then in a browser: log in as `demo` (password from the `nictiz-ui-demo-user`
-   Secret), create a composition (2xx proves the BFF's `client_credentials`
-   hop end-to-end), and check `kubectl logs deploy/nictiz-ui` shows no
-   401-retry loops. Stack regression: `make smoke` still green, and
-   `kubectl get ingress -A -o yaml | grep -c snippet` → 0.
-
-Rollback = revert both repos together; the old path is unrecoverable regardless
-(EHRbase basic auth is gone upstream).

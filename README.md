@@ -5,8 +5,7 @@ composition browser grouped by template, a hand-written Medblocks form for the
 **EPS Patient Summary** template, and a technical/settings view.
 
 Built on the decision reached in a dedicated evaluation: **Medblocks UI with
-hand-written forms** ("Track B"). The evaluation and its defect catalogue live
-in a separate (private) evaluation repository.
+hand-written forms** ("Track B").
 
 ---
 
@@ -282,11 +281,11 @@ id travels in the URL —
 sections the registry holds for that id, and **refuses to open** for a template
 with no form, one missing from the CDR, or a URL naming no template at all.
 
-That last part is the point of the design. The form previously rendered EPS
-Patient Summary's fields for *any* template id, so a composition could be filled
-in against a foreign template — binding EPS paths that the CDR would reject at
-save, or store wrongly. Adding a template means adding it to the registry; there
-is no path where an unregistered template reaches the form.
+That last part is the point of the design: without the registry gate, a
+composition could be filled in against a foreign template — binding EPS paths
+that the CDR would reject at save, or store wrongly. Adding a template means
+adding it to the registry; there is no path where an unregistered template
+reaches the form.
 
 ---
 
@@ -294,8 +293,7 @@ is no path where an unregistered template reaches the form.
 
 Medblocks has ten known defects, **nine of which fail silently**. All the
 compensations live in one file — `src/openehr/medblocks.ts` — so their cost is
-visible and they cannot be dropped by accident. Full detail is in the
-evaluation's `docs/TRACK-B-GAPS-AND-WORKAROUNDS.md`.
+visible and they cannot be dropped by accident.
 
 The authoring rules, all of which fail silently:
 
@@ -344,8 +342,8 @@ name.** `body_site` is the standing proof: three shapes in one template.
 ## Mandatory fields
 
 Every field the OPT marks `min = 1` is enforced **in the form**, before anything
-is submitted. Previously the only thing checking them was EHRbase, which answers
-a missing one with
+is submitted. Without this, the only check is EHRbase's, which answers a
+missing field with
 
 ```
 HTTP 422 … /content[openEHR-EHR-EVALUATION.adverse_reaction_risk.v2]
@@ -353,8 +351,8 @@ HTTP 422 … /content[openEHR-EHR-EVALUATION.adverse_reaction_risk.v2]
 ```
 
 — an RM path, after the whole form has been filled in, naming nothing the user
-can see on screen. Now the save is refused in the browser, the field is named in
-the template's own words, and the control is marked where it sits.
+can see on screen. Instead the save is refused in the browser, the field is
+named in the template's own words, and the control is marked where it sits.
 
 Nothing hardcodes the list: `mandatoryFields()` in `src/openehr/webtemplate.ts`
 reads `min` from the same template the CDR validates against, so the two cannot
@@ -414,9 +412,7 @@ subject: {
 ```
 
 That is what makes `GET /ehr?subject_id=…&subject_namespace=fhir` resolve. EHRs
-created without it are orphans — valid, but unreachable from any patient. This
-CDR holds 41 such EHRs left by the evaluation PoC; they are deliberately left
-alone rather than given invented demographics.
+created without it are orphans — valid, but unreachable from any patient.
 
 ### Deleting a patient
 
@@ -457,9 +453,8 @@ Three things this does **not** do, none of them surfaced in the UI:
 - **Composition deletion is logical.** openEHR appends a deleted version; the CDR
   retains the full version history.
 - **Pre-existing Bundles are untouched.** Bundles stored before this linkage
-  existed — 38 of them on the demo stack — carry no patient identifier and are
-  unattributable. Clear them wholesale with HAPI's `$expunge` if demo data needs
-  a reset.
+  existed carry no patient identifier and are unattributable. Clear them
+  wholesale with HAPI's `$expunge` if demo data needs a reset.
 
 Two things about this stack that its own CapabilityStatement gets wrong, both
 found by probing it and both worked around in the BFF:
@@ -479,9 +474,8 @@ found by probing it and both worked around in the BFF:
 - **No per-user authorisation or audit trail** (above). Login is per-user
   (Keycloak), but every account has the same full access to every record.
 - **Composition scope.** The form covers Allergies, Problems, Medical Devices
-  and History of Procedures — the four sections this template actually has. The
-  visual mockup shows Medications and Vital Signs; `EPS Patient Summary`
-  contains neither.
+  and History of Procedures — the four sections this template actually has
+  (`EPS Patient Summary` contains neither Medications nor Vital Signs).
 - **`|other` fields cannot bind.** `fromFlat` splits on `|`, so an element whose
   path contains `|other` never matches. Affects two keys in Problems.
 - **Terminology is a local seed list.** `LocalTerminologyProvider` is a stand-in
