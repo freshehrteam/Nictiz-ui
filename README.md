@@ -79,7 +79,7 @@ Demo patients created by `npm run seed` are fictional. They carry the FHIR tag
 ## Deploying to Hetzner
 
 The app runs **alongside** the
-[`freshehr-open-health-stack`](https://github.com/freshehr/freshehr-open-health-stack)
+[`freshehr-open-health-stack`](https://github.com/freshehrteam/Open-health-stack)
 deployment (the "stack repo" referenced throughout this README): the same
 k3s cluster on hcloud, the same `health-stack` namespace, its own Helm release.
 
