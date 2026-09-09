@@ -104,6 +104,17 @@ export class EpsSettings extends LitElement {
                   : nothing}
               </dd>
 
+              <dt>Hades terminology</dt>
+              <dd>
+                <span class="pill ${this.health?.hades === 'up' ? 'up' : 'down'}">
+                  ${this.health?.hades ?? 'checking…'}
+                </span>
+                ${this.health?.hadesBase ?? ''}
+                ${this.health?.hadesVersion
+                  ? html`<span class="muted">v${this.health.hadesVersion}</span>`
+                  : nothing}
+              </dd>
+
               <dt>Patients</dt>
               <dd>${this.stats?.patients ?? '—'}</dd>
               <dt>EHRs</dt>

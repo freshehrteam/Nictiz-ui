@@ -34,8 +34,9 @@ import dotenv from 'dotenv';
 
 import { callerIdentity, type HeaderBag } from './identity';
 import { createTokenManager } from './oidc';
-import { identifyBundleWithPatient } from './bundle-link';
+import { identifyBundleWithPatient, linkBundleToComposition } from './bundle-link';
 import { adoptedEhrStatus, interceptorEhrId } from './ehr-link';
+import { bundleSummaries } from './bundle-summaries';
 
 const here = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: resolve(here, '../../.env') });
@@ -44,6 +45,9 @@ const EHRBASE_BASE =
   process.env.EHRBASE_BASE ?? 'http://localhost:8082/ehrbase/rest/openehr/v1';
 const FHIR_BASE = process.env.FHIR_BASE ?? 'http://localhost:8080/fhir';
 const OPENFHIR_BASE = process.env.OPENFHIR_BASE ?? 'http://localhost:8083';
+// Hades, the stack's FHIR terminology server (SNOMED CT / LOINC). Like
+// FHIR_BASE this includes the /fhir prefix — its whole API lives under it.
+const HADES_BASE = process.env.HADES_BASE ?? 'http://localhost:8084/fhir';
 // Keycloak client_credentials for the BFF→EHRbase hop. The dev fallbacks are
 // the fixed values baked into the compose stack's committed realm import, so a
 // bare `npm run dev` against the local stack works with no .env at all.
@@ -445,7 +449,7 @@ app.get('/api/me', (req, res) => {
 
 // --- health & stats ---------------------------------------------------------
 
-/** Reachability of both back ends plus the template list. */
+/** Reachability of every back end plus the template list. */
 app.get('/api/health', async (_req, res) => {
   const health: Record<string, unknown> = {};
 
@@ -487,9 +491,28 @@ app.get('/api/health', async (_req, res) => {
     health.openfhirDetail = (err as Error).message;
   }
 
+  // Hades has no dedicated health endpoint; /fhir/metadata (the
+  // CapabilityStatement) is what its own container healthcheck probes, so the
+  // UI reports the same signal. `software.version` names the underlying
+  // Hermes release, mirroring what openfhirVersion does for the engine.
+  try {
+    const upstream = await fetch(`${HADES_BASE.replace(/\/$/, '')}/metadata`, {
+      headers: { Accept: 'application/fhir+json' },
+    });
+    health.hades = upstream.ok ? 'up' : `error ${upstream.status}`;
+    if (upstream.ok) {
+      const body = (await upstream.json()) as { software?: { version?: string } };
+      if (body?.software?.version) health.hadesVersion = body.software.version;
+    }
+  } catch (err) {
+    health.hades = 'down';
+    health.hadesDetail = (err as Error).message;
+  }
+
   health.ehrbaseBase = EHRBASE_BASE;
   health.fhirBase = FHIR_BASE;
   health.openfhirBase = OPENFHIR_BASE;
+  health.hadesBase = HADES_BASE;
   res.json(health);
 });
 
@@ -829,29 +852,54 @@ async function countBundlesFor(patientId: string): Promise<number> {
 }
 
 /**
- * The ids of every stored Bundle naming this patient.
+ * Every stored Bundle naming this patient, as HAPI's raw searchset.
  *
- * Ids rather than a conditional delete: see the delete route for why the
- * advertised `conditionalDelete: multiple` cannot be relied on here. Same
- * no-cache reasoning as `countBundlesFor`.
- *
- * The obvious optimisation — `_elements=id`, to avoid pulling back Bundles that
- * are tens of kilobytes each — does NOT work on this server: it answers a
- * SUBSETTED searchset carrying `total` but NO `entry` array at all, so the ids
- * come back empty and nothing is deleted. Measured live. The full read is the
- * price of getting the ids.
+ * Same no-cache reasoning as `countBundlesFor`. The obvious optimisation —
+ * `_elements=id`, to avoid pulling back Bundles that are tens of kilobytes
+ * each — does NOT work on this server: it answers a SUBSETTED searchset
+ * carrying `total` but NO `entry` array at all, so the ids come back empty and
+ * nothing is deleted. Measured live. The full read is the price of getting the
+ * ids, which is also why the list route below reuses this one fetch instead of
+ * adding a second shape of the same query.
  */
-async function bundleIdsFor(patientId: string): Promise<string[]> {
+async function searchBundlesFor(patientId: string): Promise<unknown> {
   const upstream = await fetch(
     fhirUrl('Bundle', { identifier: patientId, _count: '200' }),
     { headers: { Accept: 'application/fhir+json', 'Cache-Control': 'no-cache' } },
   );
-  if (!upstream.ok) return [];
-  const body = await upstream.json();
+  if (!upstream.ok) return {};
+  return upstream.json();
+}
+
+/**
+ * The ids of every stored Bundle naming this patient.
+ *
+ * Ids rather than a conditional delete: see the delete route for why the
+ * advertised `conditionalDelete: multiple` cannot be relied on here.
+ */
+async function bundleIdsFor(patientId: string): Promise<string[]> {
+  const body: any = await searchBundlesFor(patientId);
   return (body?.entry ?? [])
     .map((e: any) => e?.resource?.id)
     .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0);
 }
+
+/**
+ * The stored Bundles naming this patient, as list-row summaries.
+ *
+ * What makes a saved document findable again: without this the only Bundle a
+ * user ever sees is the one the save pipeline just produced. Patient-linked
+ * rather than EHR-linked, so it answers even for a patient with no openEHR
+ * record at all.
+ */
+app.get('/api/patients/:id/bundles', async (req, res) => {
+  try {
+    const body = await searchBundlesFor(req.params.id);
+    res.json({ patientId: req.params.id, bundles: bundleSummaries(body ?? {}) });
+  } catch (err) {
+    res.status(502).json({ error: 'Could not list stored Bundles', detail: (err as Error).message });
+  }
+});
 
 /**
  * What deleting this patient would remove.
@@ -1273,16 +1321,22 @@ function stripInterceptedProfile(bundle: any): any {
  * `?patientId=` is optional on purpose: without it the request behaves exactly
  * as it always has, so every existing caller keeps working unchanged. With it
  * the Bundle becomes attributable, which is what makes patient deletion able to
- * find and remove it.
+ * find and remove it. `?compositionUid=` is optional for the same reason: with
+ * it the Bundle also names the composition it was mapped from, which is what
+ * lets the compositions view nest it under its source.
  */
 app.post('/api/fhir/Bundle', (req, res) => {
   const patientId = req.query.patientId ? String(req.query.patientId) : '';
-  const stripped = stripInterceptedProfile(req.body);
+  const compositionUid = req.query.compositionUid ? String(req.query.compositionUid) : '';
+
+  let bundle = stripInterceptedProfile(req.body);
+  if (patientId) bundle = identifyBundleWithPatient(bundle, patientId);
+  if (compositionUid) bundle = linkBundleToComposition(bundle, compositionUid);
 
   return forwardFhir(res, fhirUrl('Bundle'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/fhir+json', Prefer: 'return=representation' },
-    body: JSON.stringify(patientId ? identifyBundleWithPatient(stripped, patientId) : stripped),
+    body: JSON.stringify(bundle),
   });
 });
 

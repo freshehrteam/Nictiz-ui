@@ -11,6 +11,7 @@
  *   #/patients/:patientId/compositions/new?template=…
  *   #/patients/:patientId/compositions/:uid
  *   #/patients/:patientId/compositions/:uid/summary?bundle=…
+ *   #/patients/:patientId/bundles/:bundleId
  *   #/settings
  *
  * LIGHT DOM (see `createRenderRoot`) is mandatory throughout this app: inside a
@@ -81,6 +82,14 @@ export function parseRoute(hash: string): Route {
 
       return { view: 'form', patientId, uid: decodeURIComponent(uid), templateId };
     }
+
+    // `…/bundles/:bundleId` — a stored Bundle opened from the list, not from a
+    // just-saved composition. Same summary view; `uid` stays undefined, which
+    // is what flips its back button to the compositions list.
+    if (segments[2] === 'bundles' && segments[3]) {
+      return { view: 'summary', patientId, bundleId: decodeURIComponent(segments[3]) };
+    }
+
     return { view: 'compositions', patientId };
   }
 
@@ -133,6 +142,7 @@ export class EpsApp extends LitElement {
         ehrbase: 'unreachable',
         fhir: 'unreachable',
         openfhir: 'unreachable',
+        hades: 'unreachable',
         templates: [],
       };
     }
@@ -279,6 +289,10 @@ export class EpsApp extends LitElement {
           <div class="conn">
             <span class="dot ${this.health?.openfhir === 'up' ? 'up' : 'down'}"></span>
             openFHIR ${this.health?.openfhir ?? 'checking…'}
+          </div>
+          <div class="conn">
+            <span class="dot ${this.health?.hades === 'up' ? 'up' : 'down'}"></span>
+            Hades ${this.health?.hades ?? 'checking…'}
           </div>
         </div>
       </aside>

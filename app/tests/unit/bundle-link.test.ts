@@ -11,7 +11,12 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { PATIENT_LINK_SYSTEM, identifyBundleWithPatient } from '../../server/bundle-link';
+import {
+  COMPOSITION_LINK_SYSTEM,
+  PATIENT_LINK_SYSTEM,
+  identifyBundleWithPatient,
+  linkBundleToComposition,
+} from '../../server/bundle-link';
 
 /** A Bundle shaped like the ones openFHIR actually returns. */
 function bundle() {
@@ -80,5 +85,66 @@ describe('identifyBundleWithPatient', () => {
 
   it('tolerates a null bundle', () => {
     expect(identifyBundleWithPatient(null, '42')).toBeNull();
+  });
+});
+
+describe('linkBundleToComposition', () => {
+  const UID = 'abc-123::local.ehrbase.org::1';
+
+  it('adds a meta.tag naming the source composition', () => {
+    const result = linkBundleToComposition(bundle(), UID);
+
+    expect(result.meta.tag).toContainEqual({ system: COMPOSITION_LINK_SYSTEM, code: UID });
+  });
+
+  it('leaves entry referentially unchanged — same interceptor argument', () => {
+    const input = bundle();
+    const result = linkBundleToComposition(input, UID);
+
+    expect(result.entry).toBe(input.entry);
+  });
+
+  it('preserves meta.profile and unrelated tags', () => {
+    const input = bundle();
+    (input.meta as any).tag = [{ system: 'urn:other', code: 'keep-me' }];
+
+    const result = linkBundleToComposition(input, UID);
+
+    expect(result.meta.profile).toEqual([
+      'http://hl7.org/fhir/uv/ips/StructureDefinition/Bundle-uv-ips',
+    ]);
+    expect(result.meta.tag).toContainEqual({ system: 'urn:other', code: 'keep-me' });
+  });
+
+  it('replaces an earlier composition link instead of accumulating', () => {
+    const once = linkBundleToComposition(bundle(), 'abc-123::local.ehrbase.org::1');
+    const twice = linkBundleToComposition(once, 'abc-123::local.ehrbase.org::2');
+
+    const links = twice.meta.tag.filter((t: any) => t.system === COMPOSITION_LINK_SYSTEM);
+    expect(links).toEqual([{ system: COMPOSITION_LINK_SYSTEM, code: 'abc-123::local.ehrbase.org::2' }]);
+  });
+
+  it('composes with the patient link — both survive', () => {
+    const result = linkBundleToComposition(identifyBundleWithPatient(bundle(), '42'), UID);
+
+    expect(result.identifier).toEqual({ system: PATIENT_LINK_SYSTEM, value: '42' });
+    expect(result.meta.tag).toContainEqual({ system: COMPOSITION_LINK_SYSTEM, code: UID });
+  });
+
+  it('does not mutate the bundle it was given', () => {
+    const input = bundle();
+    linkBundleToComposition(input, UID);
+
+    expect((input.meta as any).tag).toBeUndefined();
+  });
+
+  it('returns the bundle untouched when there is no uid', () => {
+    const input = bundle();
+
+    expect(linkBundleToComposition(input, '')).toBe(input);
+  });
+
+  it('tolerates a null bundle', () => {
+    expect(linkBundleToComposition(null, UID)).toBeNull();
   });
 });

@@ -84,6 +84,24 @@ describe('parseRoute', () => {
     });
   });
 
+  it('routes a stored Bundle to the summary view, with no composition in context', () => {
+    // `uid` must stay undefined — it is what flips the summary's back button
+    // from "back to composition" to "back to compositions".
+    expect(parseRoute('#/patients/p-1/bundles/42')).toEqual({
+      view: 'summary',
+      patientId: 'p-1',
+      bundleId: '42',
+    });
+    expect(parseRoute('#/patients/p-1/bundles/42').uid).toBeUndefined();
+  });
+
+  it('treats a bare /bundles with no id as the compositions view', () => {
+    expect(parseRoute('#/patients/p-1/bundles')).toMatchObject({
+      view: 'compositions',
+      patientId: 'p-1',
+    });
+  });
+
   it('decodes uids and templates containing reserved characters', () => {
     const uid = 'abc-123::local.ehrbase.org::1';
     const route = parseRoute(

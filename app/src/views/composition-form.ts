@@ -713,7 +713,9 @@ export class EpsCompositionForm extends LitElement {
         // the id travels in the URL and the viewer re-reads from the server.
         this.setStep('bundle', 'running');
         const bundleStarted = performance.now();
-        const bundleId = await storeBundle(bundle, this.patientId);
+        // The freshly committed uid rides along, so the stored Bundle can say
+        // which composition (and which version of it) it was mapped from.
+        const bundleId = await storeBundle(bundle, this.patientId, uid);
 
         this.run = { ...this.run, bundleId };
         await dwell(Math.max(0, stepDwell('bundle') - (performance.now() - bundleStarted)));

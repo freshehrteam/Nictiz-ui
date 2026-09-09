@@ -95,8 +95,17 @@ export class EpsPatientSummary extends LitElement {
     }
   }
 
-  /** Back to the composition this was mapped from. */
+  /**
+   * Back to the composition this was mapped from — or, when the view was
+   * opened from the stored-Bundles list and no composition is in context
+   * (`uid` empty), to the compositions page itself. Without the fallback the
+   * button would navigate to `…/compositions/` with an empty uid.
+   */
   private toComposition(): void {
+    if (!this.uid) {
+      navigate(`#/patients/${encodeURIComponent(this.patientId)}/compositions`);
+      return;
+    }
     navigate(
       `#/patients/${encodeURIComponent(this.patientId)}/compositions/${encodeURIComponent(this.uid)}` +
         (this.templateId ? `?template=${encodeURIComponent(this.templateId)}` : ''),
@@ -142,7 +151,7 @@ export class EpsPatientSummary extends LitElement {
             `
           : nothing}
         <button class="btn" @click=${this.toComposition} data-testid="summary-back">
-          Back to composition
+          ${this.uid ? 'Back to composition' : 'Back to compositions'}
         </button>
       </div>
 
@@ -164,7 +173,9 @@ export class EpsPatientSummary extends LitElement {
         <div class="summary-state error" data-testid="summary-error">
           <p>Could not load the Patient Summary.</p>
           <p class="mono">${this.error}</p>
-          <button class="btn" @click=${this.toComposition}>Back to the composition</button>
+          <button class="btn" @click=${this.toComposition}>
+            ${this.uid ? 'Back to the composition' : 'Back to compositions'}
+          </button>
         </div>
       `;
     }

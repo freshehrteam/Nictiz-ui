@@ -7,6 +7,12 @@ import { defineConfig, devices } from '@playwright/test';
  * `npm run test:e2e` starts the BFF and Vite itself; the EHRbase + HAPI stack
  * must already be up, and tests that need it are tagged @stack.
  */
+// Overridable together with VITE_PORT / PORT / BFF_URL (see vite.config.ts) so
+// a worktree's e2e run drives its own dev pair, not whichever checkout happens
+// to hold 5173 — `reuseExistingServer` would otherwise silently test the
+// other checkout's code.
+const BASE_URL = process.env.PW_BASE_URL ?? 'http://localhost:5173';
+
 export default defineConfig({
   testDir: './tests/e2e',
   testMatch: '**/*.spec.ts',
@@ -19,14 +25,14 @@ export default defineConfig({
   fullyParallel: false,
   reporter: [['list']],
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: BASE_URL,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     ...devices['Desktop Chrome'],
   },
   webServer: {
     command: 'npm run dev',
-    url: 'http://localhost:5173',
+    url: BASE_URL,
     reuseExistingServer: true,
     timeout: 120_000,
     cwd: import.meta.dirname,

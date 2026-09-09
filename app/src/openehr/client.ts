@@ -9,15 +9,21 @@ export interface HealthStatus {
   ehrbase: string;
   fhir: string;
   openfhir: string;
+  /** Hades, the stack's FHIR terminology server (SNOMED CT / LOINC). */
+  hades: string;
   templates: string[];
   ehrbaseBase?: string;
   fhirBase?: string;
   openfhirBase?: string;
+  hadesBase?: string;
   ehrbaseDetail?: string;
   fhirDetail?: string;
   openfhirDetail?: string;
+  hadesDetail?: string;
   /** Engine version reported by openFHIR's `/status`, when reachable. */
   openfhirVersion?: string;
+  /** Hermes release from Hades' CapabilityStatement, when reachable. */
+  hadesVersion?: string;
 }
 
 export interface Stats {

@@ -40,6 +40,7 @@ export class EpsDashboard extends LitElement {
     const ehrbaseUp = this.health?.ehrbase === 'up';
     const fhirUp = this.health?.fhir === 'up';
     const openfhirUp = this.health?.openfhir === 'up';
+    const hadesUp = this.health?.hades === 'up';
 
     return html`
       <div class="view-head">
@@ -80,6 +81,12 @@ export class EpsDashboard extends LitElement {
                 openFHIR ${this.health?.openfhir ?? 'checking…'}
               </span>
               <span class="mono muted">${this.health?.openfhirBase ?? ''}</span>
+            </div>
+            <div class="template-row">
+              <span class="pill ${hadesUp ? 'up' : 'down'}">
+                Hades ${this.health?.hades ?? 'checking…'}
+              </span>
+              <span class="mono muted">${this.health?.hadesBase ?? ''}</span>
             </div>
           </div>
         </div>

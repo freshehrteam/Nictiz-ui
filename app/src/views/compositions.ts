@@ -20,12 +20,17 @@
  *
  * A patient may legitimately have no EHR yet (they were created outside the
  * seeding script), so this view offers to create one rather than dead-ending.
+ *
+ * Below the two panes sits the stored-FHIR-Bundles card — the documents the
+ * save pipeline mapped and stored in HAPI. They are patient-linked, not
+ * EHR-linked, so the card renders even for a patient with no openEHR record.
  */
 
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { listCompositions, listTemplates, createEhr, type TemplateGroup } from '../openehr/client';
 import { getPatientEhr } from '../fhir/client';
+import { listPatientBundles, type BundleSummary } from '../fhir/bundle';
 import type { PatientView } from '../fhir/patient';
 import { isRecordable } from '../forms/registry';
 import { navigate } from '../shell';
@@ -58,6 +63,9 @@ export class EpsCompositions extends LitElement {
   @state() private loading = true;
   @state() private busy = false;
   @state() private error = '';
+  /** Stored FHIR Bundles for this patient — HAPI-side, so independent of the EHR. */
+  @state() private bundles: BundleSummary[] = [];
+  @state() private bundlesError = '';
 
   updated(changed: Map<string, unknown>): void {
     if (changed.has('patientId') && this.patientId) void this.load();
@@ -71,14 +79,22 @@ export class EpsCompositions extends LitElement {
   private async load(): Promise<void> {
     this.loading = true;
     this.error = '';
+    this.bundlesError = '';
     try {
-      const [ehrId, templates] = await Promise.all([
+      const [ehrId, templates, bundles] = await Promise.all([
         getPatientEhr(this.patientId),
         listTemplates().catch(() => [] as string[]),
+        // HAPI being down must not break the EHRbase-backed compositions list —
+        // the failure lands in the Bundles card, not on the whole page.
+        listPatientBundles(this.patientId).catch((err) => {
+          this.bundlesError = (err as Error).message;
+          return [] as BundleSummary[];
+        }),
       ]);
 
       this.ehrId = ehrId;
       this.templates = templates;
+      this.bundles = bundles;
 
       const { groups } = ehrId ? await listCompositions(ehrId) : { groups: [] as TemplateGroup[] };
       this.groups = groups;
@@ -172,6 +188,41 @@ export class EpsCompositions extends LitElement {
     );
   }
 
+  /** Opens a stored Bundle in the same summary view the save pipeline lands on. */
+  private openBundle(id: string): void {
+    navigate(
+      `#/patients/${encodeURIComponent(this.patientId)}/bundles/${encodeURIComponent(id)}`,
+    );
+  }
+
+  /**
+   * The stored Bundles mapped from this composition — "this Bundle came from
+   * this composition".
+   *
+   * Matched on the uid's uuid half, not the full versioned uid: the list shows
+   * the composition's LATEST version, while each save stamps its Bundle with
+   * the version it mapped — so after an update the v1 Bundle must still attach
+   * to the (now v2) composition row. Which version each Bundle came from is
+   * shown on its own row instead.
+   */
+  private bundlesFor(compositionUid: string): BundleSummary[] {
+    const root = compositionUid.split('::')[0];
+    return this.bundles.filter((b) => b.compositionUid?.split('::')[0] === root);
+  }
+
+  /**
+   * Bundles no composition of this patient claims: stored before the
+   * composition link existed, or mapped from a composition since deleted.
+   * These are what the bottom card lists — everything else sits nested under
+   * its source.
+   */
+  private get unattributedBundles(): BundleSummary[] {
+    const roots = new Set(
+      this.groups.flatMap((g) => g.compositions.map((c) => c.uid.split('::')[0])),
+    );
+    return this.bundles.filter((b) => !roots.has(b.compositionUid?.split('::')[0] ?? ''));
+  }
+
   render() {
     return html`
       <div class="view-head">
@@ -185,6 +236,84 @@ export class EpsCompositions extends LitElement {
       ${this.error ? html`<div class="message error">${this.error}</div>` : nothing}
       ${this.renderNewCompositionBanner()}
       ${this.renderBody()}
+      ${this.renderBundlesCard()}
+    `;
+  }
+
+  /** The Bundles mapped from one composition, nested under its row. */
+  private renderCompositionBundles(compositionUid: string) {
+    const bundles = this.bundlesFor(compositionUid);
+    if (!bundles.length) return nothing;
+
+    return html`
+      <div class="bundle-sublist" data-testid="composition-bundles">
+        ${bundles.map((b) => this.renderBundleRow(b))}
+      </div>
+    `;
+  }
+
+  /**
+   * The stored FHIR Bundles no composition above accounts for.
+   *
+   * Below the two-pane grid, and rendered even when the patient has no EHR:
+   * Bundles are patient-linked in HAPI, not EHR-linked, so they can exist —
+   * and must stay reachable — regardless of the openEHR side. Bundles that DO
+   * name their source composition sit nested under it instead; this card is
+   * for the rest — stored before the link existed, or orphaned by a deleted
+   * composition — because hiding them would misrepresent what HAPI holds.
+   *
+   * With nothing to list (and no failure to report), the card does not render
+   * at all: an empty "other" section is pure noise on the normal path, where
+   * every Bundle sits under its composition.
+   */
+  private renderBundlesCard() {
+    if (this.loading) return nothing;
+    const unattributed = this.unattributedBundles;
+    if (!this.bundlesError && !unattributed.length) return nothing;
+
+    return html`
+      <div class="card bundles-card">
+        <div class="card-head">
+          <h3>Other stored FHIR Bundles</h3>
+          <span class="muted">${unattributed.length} of ${this.bundles.length}</span>
+        </div>
+
+        ${this.bundlesError
+          ? html`<div class="empty">Could not list stored Bundles: ${this.bundlesError}</div>`
+          : html`
+              <div class="bundle-list" data-testid="bundle-list">
+                ${unattributed.map((b) => this.renderBundleRow(b))}
+              </div>
+              <p class="template-note">
+                These Bundles don’t name a source composition — they were stored before that
+                link existed, or their composition was deleted.
+              </p>
+            `}
+      </div>
+    `;
+  }
+
+  private renderBundleRow(b: BundleSummary) {
+    const when = b.timestamp ?? b.lastUpdated;
+    // The version half of the stamped uid: after an update, "from v1" is what
+    // distinguishes the Bundles a composition accumulated across its saves.
+    const version = b.compositionUid?.split('::')[2];
+    const meta = [`Bundle/${b.id}`, when, `${b.entryCount} resources`, version && `from v${version}`]
+      .filter(Boolean)
+      .join(' · ');
+
+    return html`
+      <button
+        class="bundle-item"
+        @click=${() => this.openBundle(b.id)}
+        data-testid="bundle-${b.id}"
+      >
+        <span>
+          <span class="when">${b.title ?? 'FHIR document Bundle'}</span><br />
+          <span class="uid">${meta}</span>
+        </span>
+        <span class="chev" aria-hidden="true">›</span>
+      </button>
     `;
   }
 
@@ -334,20 +463,23 @@ export class EpsCompositions extends LitElement {
               <div class="composition-list" data-testid="composition-list">
                 ${group.compositions.map(
                   (c) => html`
-                    <button
-                      class="composition-item"
-                      @click=${() => this.open(c.uid, c.templateId)}
-                      title=${c.uid}
-                      data-testid="composition-${c.uid.split('::')[0]}"
-                    >
-                      <span>
-                        <span class="when">${c.startTime || '(no start time)'}</span><br />
-                        <span class="uid">
-                          ${c.uid.split('::')[0].slice(0, 8)}… · v${c.uid.split('::')[2] ?? '1'}
+                    <div class="composition-entry">
+                      <button
+                        class="composition-item"
+                        @click=${() => this.open(c.uid, c.templateId)}
+                        title=${c.uid}
+                        data-testid="composition-${c.uid.split('::')[0]}"
+                      >
+                        <span>
+                          <span class="when">${c.startTime || '(no start time)'}</span><br />
+                          <span class="uid">
+                            ${c.uid.split('::')[0].slice(0, 8)}… · v${c.uid.split('::')[2] ?? '1'}
+                          </span>
                         </span>
-                      </span>
-                      <span class="chev" aria-hidden="true">›</span>
-                    </button>
+                        <span class="chev" aria-hidden="true">›</span>
+                      </button>
+                      ${this.renderCompositionBundles(c.uid)}
+                    </div>
                   `,
                 )}
               </div>

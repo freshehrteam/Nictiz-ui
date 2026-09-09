@@ -58,11 +58,16 @@ test.describe('shell and navigation', () => {
     await expect(page.locator('.pill', { hasText: 'EHRbase up' })).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('.pill', { hasText: 'openFHIR up' })).toBeVisible();
 
-    // All three, by exact text. `hasText: 'FHIR up'` alone is a substring match
+    // All four, by exact text. `hasText: 'FHIR up'` alone is a substring match
     // that the openFHIR pill also satisfies, so HAPI's row could vanish and the
     // assertion would still pass. toHaveText normalises the template's newline
     // padding, which an anchored /^FHIR up$/ regex would not.
-    await expect(page.locator('.pill')).toHaveText(['EHRbase up', 'FHIR up', 'openFHIR up']);
+    await expect(page.locator('.pill')).toHaveText([
+      'EHRbase up',
+      'FHIR up',
+      'openFHIR up',
+      'Hades up',
+    ]);
 
     // Counts render as soon as /api/stats answers.
     const patients = page.locator('.tile', { hasText: 'Patients (FHIR)' }).locator('.value');
@@ -735,6 +740,60 @@ test.describe('save pipeline and the Patient Summary', () => {
     await expect(error).toBeVisible({ timeout: 15_000 });
     await expect(error).toContainText('Could not load the Patient Summary');
     await expect(error.locator('button')).toBeVisible();
+  });
+
+  /**
+   * Stored Bundles stay reachable AFTER the save, nested under the composition
+   * they were mapped from. Before the list, the only way to a Bundle was the
+   * pipeline dialog right after saving it, or a hand-crafted URL — a stored
+   * document effectively vanished on navigation. The nesting itself is the
+   * provenance claim: "this Bundle came from this composition", carried by the
+   * meta.tag the store route stamps.
+   */
+  test('@stack lists stored Bundles on /compositions and opens one', async ({ page }) => {
+    const substance = `Bundle list probe (e2e ${Date.now()})`;
+
+    // Save one, so there is at least one Bundle to list.
+    const patientId = await selectPatient(page, 'last');
+    await page.locator('[data-testid=new-composition]').click();
+    await formReady(page);
+    await page.evaluate((value) => {
+      const control = document.querySelector(
+        '[data-testid$="/adverse_reaction_risk:0/substance"]',
+      ) as (HTMLElement & { data?: unknown }) | null;
+      if (control) control.data = { value, code: '762952008', terminology: 'SNOMED-CT' };
+    }, substance);
+    await page.locator('[data-testid=form-save]').click();
+    await expect(page.locator('[data-testid=step-bundle]')).toHaveAttribute('data-state', 'done', {
+      timeout: 60_000,
+    });
+
+    // Back to the compositions page — the Bundle must now sit nested under the
+    // composition this very save created, not in the unattributed card.
+    await page.goto(`/#/patients/${patientId}/compositions`);
+    const nested = page.locator('[data-testid=composition-bundles]').first();
+    await expect(nested).toBeVisible({ timeout: 15_000 });
+    const row = nested.locator('[data-testid^=bundle-]').first();
+    await expect(row).toBeVisible();
+    await expect(row).toContainText('resources');
+    // The version half of the stamped uid, proving the link round-tripped.
+    await expect(row).toContainText(/from v\d+/);
+
+    // Clicking it opens the same summary view the pipeline CTA lands on.
+    await row.click();
+    await expect(page).toHaveURL(/#\/patients\/.+\/bundles\/\d+/, { timeout: 15_000 });
+    await expect(
+      page.locator('eps-patient-summary [data-testid=summary-banner]'),
+    ).toBeVisible({ timeout: 15_000 });
+
+    // No composition is in context on this route, so the way back is the list.
+    const back = page.locator('[data-testid=summary-back]');
+    await expect(back).toHaveText(/Back to compositions/);
+    await back.click();
+    await expect(page).toHaveURL(new RegExp(`#/patients/${patientId}/compositions$`));
+    await expect(page.locator('[data-testid=composition-bundles]').first()).toBeVisible({
+      timeout: 15_000,
+    });
   });
 });
 

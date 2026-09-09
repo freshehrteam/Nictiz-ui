@@ -121,9 +121,20 @@ export async function toFhir(templateId: string, canonical: unknown): Promise<Fh
  * particular cannot be removed when the patient is deleted. It is optional so
  * that the endpoint stays backward-compatible; see `identifyBundleWithPatient`
  * in the BFF for what it costs.
+ *
+ * `compositionUid` names the composition this Bundle was mapped from, so the
+ * compositions view can nest it under its source. Also optional — a Bundle
+ * stored without it is listed but not attributed.
  */
-export async function storeBundle(bundle: FhirBundle, patientId?: string): Promise<string> {
-  const query = patientId ? `?patientId=${encodeURIComponent(patientId)}` : '';
+export async function storeBundle(
+  bundle: FhirBundle,
+  patientId?: string,
+  compositionUid?: string,
+): Promise<string> {
+  const params = new URLSearchParams();
+  if (patientId) params.set('patientId', patientId);
+  if (compositionUid) params.set('compositionUid', compositionUid);
+  const query = params.size ? `?${params}` : '';
   const stored = await json<FhirBundle>(
     await fetch(`/api/fhir/Bundle${query}`, {
       method: 'POST',
@@ -144,4 +155,35 @@ export async function readBundle(id: string): Promise<FhirBundle> {
     await fetch(`/api/fhir/Bundle/${encodeURIComponent(id)}`),
     'Bundle read',
   );
+}
+
+/**
+ * One stored Bundle as a list row. Mirrors the BFF's `bundle-summaries.ts` —
+ * the BFF reduces each stored document to these fields so the list never
+ * pulls tens of kilobytes per row into the browser.
+ */
+export interface BundleSummary {
+  id: string;
+  type?: string;
+  timestamp?: string;
+  lastUpdated?: string;
+  entryCount: number;
+  title?: string;
+  date?: string;
+  /** The versioned composition uid this Bundle was mapped from, when stamped. */
+  compositionUid?: string;
+}
+
+/**
+ * Every stored Bundle naming this patient, newest first.
+ *
+ * Patient-linked, not EHR-linked — see `identifyBundleWithPatient` in the BFF
+ * — so it answers even for a patient with no openEHR record yet.
+ */
+export async function listPatientBundles(patientId: string): Promise<BundleSummary[]> {
+  const body = await json<{ bundles?: BundleSummary[] }>(
+    await fetch(`/api/patients/${encodeURIComponent(patientId)}/bundles`),
+    'Bundle list',
+  );
+  return body.bundles ?? [];
 }

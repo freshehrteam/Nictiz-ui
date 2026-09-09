@@ -337,7 +337,8 @@ eps-compositions .template-item .count.zero {
   opacity: 0.45;
 }
 
-eps-compositions .composition-list {
+eps-compositions .composition-list,
+eps-compositions .bundle-list {
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -346,7 +347,8 @@ eps-compositions .composition-list {
   overflow: hidden;
 }
 
-eps-compositions .composition-item {
+eps-compositions .composition-item,
+eps-compositions .bundle-item {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -359,24 +361,55 @@ eps-compositions .composition-item {
   cursor: pointer;
 }
 
-eps-compositions .composition-item:hover {
+eps-compositions .composition-item:hover,
+eps-compositions .bundle-item:hover {
   background: var(--eps-teal-50);
 }
 
-eps-compositions .composition-item .when {
+eps-compositions .composition-item .when,
+eps-compositions .bundle-item .when {
   font-weight: 500;
   font-size: 13px;
 }
 
-eps-compositions .composition-item .uid {
+eps-compositions .composition-item .uid,
+eps-compositions .bundle-item .uid {
   font-family: var(--eps-mono);
   font-size: 11px;
   color: var(--eps-text-muted);
 }
 
-eps-compositions .composition-item .chev {
+eps-compositions .composition-item .chev,
+eps-compositions .bundle-item .chev {
   margin-left: auto;
   color: var(--eps-text-muted);
+}
+
+/* The stored-Bundles card sits full-width below the two-pane grid. */
+eps-compositions .bundles-card {
+  margin-top: 16px;
+}
+
+/* A composition row plus the Bundles mapped from it. The wrapper carries the
+   surface background so the sublist's indent gutter doesn't show the list's
+   border-colour backdrop through it. */
+eps-compositions .composition-entry {
+  display: flex;
+  flex-direction: column;
+  background: var(--eps-surface);
+}
+
+/* Bundles nested under their source composition: indented and rail-marked,
+   so provenance is readable at a glance. */
+eps-compositions .bundle-sublist {
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 8px 30px;
+  border-left: 2px solid var(--eps-border);
+}
+
+eps-compositions .bundle-sublist .bundle-item {
+  padding: 7px 14px;
 }
 
 /* "New composition" is the primary action on this view — see plan P5. */
