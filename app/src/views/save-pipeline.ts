@@ -168,10 +168,10 @@ export const STEPS: readonly PipelineStep[] = [
     line: (r) => {
       const total = Object.values(r.resources ?? {}).reduce((sum, n) => sum + n, 0);
       return total
-        ? `POST /openfhir/tofhir?templateId=${r.templateId} … 200, ${total} ${
+        ? `POST /$tofhir?templateId=${r.templateId} … 200, ${total} ${
             total === 1 ? 'resource' : 'resources'
           }`
-        : `POST /openfhir/tofhir?templateId=${r.templateId} … 200`;
+        : `POST /$tofhir?templateId=${r.templateId} … 200`;
     },
   },
   {

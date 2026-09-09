@@ -126,7 +126,7 @@ const tokens = createTokenManager({
   clientSecret: OIDC_CLIENT_SECRET,
   // One shared token serves both upstreams. EHRbase authorizes on
   // realm_access.roles and ignores the scope claim; the openFHIR engine
-  // (openfhir.protected) demands SCOPE_openfhir.map on /openfhir/tofhir —
+  // (openfhir.protected) demands SCOPE_openfhir.map on the $tofhir operation —
   // and it is an OPTIONAL client scope in the realm, present only when
   // requested. Registered onto nictiz-ui-svc by scripts/register-clients.ts.
   scope: 'openfhir.map',
@@ -343,7 +343,7 @@ async function forwardFhir(
  * knowing. Non-2xx bodies are therefore wrapped as `{ error: <text> }`.
  *
  * Authenticated like the EHRbase hop: the engine runs as an OAuth2 resource
- * server (openfhir.protected in the stack), and /openfhir/tofhir demands
+ * server (openfhir.protected in the stack), and the $tofhir operation demands
  * scope `openfhir.map` — which the shared token manager requests. The token's
  * `tenant: freshehr` claim (hardcoded mapper on nictiz-ui-svc) selects the
  * engine-side data store; without it the engine silos this client under its
@@ -1231,28 +1231,43 @@ app.get('/api/ehr/:ehrId/composition/:uid', (req, res) => {
 /**
  * Maps a composition to a FHIR Bundle via FHIR Connect.
  *
- * The body is forwarded verbatim: the engine deduces the incoming payload type
- * from its shape rather than from a parameter, so re-serialising it is enough
- * to change how it is read. `templateId` names the FhirConnect context, and
- * both it and the OPT must be registered in openFHIR — not merely in EHRbase —
- * or the engine answers 400 (no context) or 500 (no OPT).
+ * Since openFHIR 3.0.0 this goes through the root-level `$tofhir` FHIR
+ * operation, not the legacy `/openfhir/tofhir` mapping API. The operation
+ * takes a Parameters resource whose `composition` parameter carries the
+ * composition STRINGIFIED (flat or canonical — the engine still deduces the
+ * payload type from the parsed shape, so the JSON round-trip here is
+ * shape-preserving and safe). The browser keeps posting the bare composition;
+ * the envelope is this hop's concern. `templateId` names the FhirConnect
+ * context, and both it and the OPT must be registered in openFHIR — not
+ * merely in EHRbase — or the engine answers 400 (no context) or 500 (no OPT).
+ *
+ * Unlike the legacy endpoint, the returned Bundle also carries an
+ * engine-generated Provenance entry (and OperationOutcome warnings when
+ * mapping is lossy); both are stored and counted like any other resource.
+ *
+ * The `\\$` in the route is not decoration: Express 4's path-to-regexp leaves
+ * `$` unescaped in the compiled regex, where it anchors end-of-string — a
+ * bare '/api/openfhir/$tofhir' route never matches anything.
  */
-app.post('/api/openfhir/tofhir', (req, res) => {
+app.post('/api/openfhir/\\$tofhir', (req, res) => {
   const templateId = String(req.query.templateId ?? '');
   if (!templateId) {
     return res.status(400).json({
       error: 'templateId is required',
-      hint: 'POST /api/openfhir/tofhir?templateId=EPS%20Patient%20Summary',
+      hint: 'POST /api/openfhir/$tofhir?templateId=EPS%20Patient%20Summary',
     });
   }
 
-  const url = new URL(`${OPENFHIR_BASE.replace(/\/$/, '')}/openfhir/tofhir`);
+  const url = new URL(`${OPENFHIR_BASE.replace(/\/$/, '')}/$tofhir`);
   url.searchParams.set('templateId', templateId);
 
   return forwardOpenFhir(res, url.toString(), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req.body),
+    headers: { 'Content-Type': 'application/fhir+json' },
+    body: JSON.stringify({
+      resourceType: 'Parameters',
+      parameter: [{ name: 'composition', valueString: JSON.stringify(req.body) }],
+    }),
   });
 });
 

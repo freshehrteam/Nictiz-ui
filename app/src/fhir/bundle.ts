@@ -93,12 +93,13 @@ async function json<T>(res: Response, context: string): Promise<T> {
  * Maps a canonical composition to a FHIR Bundle.
  *
  * `canonical` is passed through untouched — openFHIR sniffs the payload shape
- * to decide how to read it, so re-serialising or reshaping it here would change
- * the engine's interpretation.
+ * to decide how to read it, so reshaping it here would change the engine's
+ * interpretation. The BFF wraps it into the Parameters envelope the engine's
+ * `$tofhir` operation expects; this side stays a bare composition POST.
  */
 export async function toFhir(templateId: string, canonical: unknown): Promise<FhirBundle> {
   return json<FhirBundle>(
-    await fetch(`/api/openfhir/tofhir?templateId=${encodeURIComponent(templateId)}`, {
+    await fetch(`/api/openfhir/$tofhir?templateId=${encodeURIComponent(templateId)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(canonical),

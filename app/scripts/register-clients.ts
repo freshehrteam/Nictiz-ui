@@ -93,7 +93,7 @@ const TENANT_MAPPER = {
   },
 };
 
-/** The one openFHIR per-API scope the BFF needs: /openfhir/tofhir (mapping API). */
+/** The one openFHIR per-API scope the BFF needs: the $tofhir mapping operation. */
 const OPENFHIR_SCOPE = 'openfhir.map';
 
 export async function registerClients(cfg: RegistrarConfig): Promise<void> {
