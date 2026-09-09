@@ -74,13 +74,16 @@ from, and that can silently disagree with the working tree.
 ```bash
 helm upgrade --install nictiz-ui . \
   -n health-stack \
-  -f values-hetzner.yaml \
-  --set image.tag=0.2.1
+  -f values-hetzner.yaml
 ```
 
+The tag lives in `values-hetzner.yaml` (`image.tag`); cutting a new one is the
+chain in [Releasing a new version to
+Hetzner](../../README.md#releasing-a-new-version-to-hetzner).
+
 > ⚠ Image tags are **unprefixed**: the build workflow strips the `v` from git
-> tags, so git tag `v0.2.1` publishes Docker tag `0.2.1`. Passing
-> `image.tag=v0.2.1` ends in `ErrImagePull`.
+> tags, so git tag `v0.3.0` publishes Docker tag `0.3.0`. Passing
+> `image.tag=v0.3.0` ends in `ErrImagePull`.
 
 No out-of-band Secret creation and no manual Keycloak work: the chart
 generates its secrets and the Job registers the clients.

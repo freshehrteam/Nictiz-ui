@@ -148,9 +148,11 @@ nothing nictiz-ui-specific — see "How registration works" in
 helm upgrade --install nictiz-ui charts/nictiz-ui \
   -n health-stack \
   -f charts/nictiz-ui/values-hetzner.yaml \
-  --set ingress.host=nictiz-demo.<domain> \
-  --set image.tag=0.2.1     # NOTE: unprefixed — git tag v0.2.1 publishes Docker tag 0.2.1
+  --set ingress.host=nictiz-demo.<domain>
 ```
+
+The image tag comes from `values-hetzner.yaml`. To cut and deploy a new one, see
+[Releasing a new version to Hetzner](#releasing-a-new-version-to-hetzner).
 
 The namespace **must** be the health-stack one: the BFF resolves `ehrbase`,
 `hapi`, `openfhir` and `keycloak` by bare Service name, and the registration
@@ -215,6 +217,125 @@ uptime monitor on it must send a Bearer token or treat the 302 as "up".
 **Per-user identity is done**: oauth2-proxy forwards who logged in, and
 `composer` records that person on every composition. What remains is per-user
 *authorisation* and an audit trail (see Known limitations).
+
+---
+
+## Releasing a new version to Hetzner
+
+Four steps. Copy-paste them in order, replacing `0.3.0` with the version you are
+cutting.
+
+```bash
+# 0 · Make sure main is what you want to ship
+git checkout main && git pull
+
+# 1 · Bump the version in three files (see below), then commit
+git commit -am "release: 0.3.0"
+
+# 2 · Tag and push — CI builds and publishes the image
+git tag v0.3.0
+git push origin main --follow-tags
+#    → wait for the build-image workflow to go green (~5 min)
+
+# 3 · Deploy
+export KUBECONFIG=../freshehr-open-health-stack/terraform/envs/hetzner/kubeconfig
+helm upgrade --install nictiz-ui charts/nictiz-ui \
+  -n health-stack -f charts/nictiz-ui/values-hetzner.yaml
+kubectl rollout status deploy/nictiz-ui -n health-stack
+
+# 4 · Check the new tag is actually running
+kubectl get pods -n health-stack -l app.kubernetes.io/name=nictiz-ui \
+  -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[*].image
+```
+
+### The three files in step 1
+
+All three get the **same** number:
+
+| File | Field | Set to |
+|---|---|---|
+| `charts/nictiz-ui/values-hetzner.yaml` | `image.tag` | `"0.3.0"` ← **this one decides what runs** |
+| `charts/nictiz-ui/Chart.yaml` | `version` + `appVersion` | `0.3.0` |
+| `app/package.json` | `version` | `0.3.0` |
+
+Optional pre-flight, the same gates CI runs:
+`cd app && npm test && npm run build`, and `helm lint charts/nictiz-ui`.
+
+### Four things that will bite you
+
+**Commit the version bump _before_ tagging.** The image is built from the commit
+the tag points at. Tag first and you publish a build whose chart still says the
+old version.
+
+**Tag the head of `main`.** Tagging an older commit publishes a build missing
+everything after it — and the deploy still succeeds. Correct chart, correct
+pull, older app, no error anywhere. `git log --oneline $(git describe --tags
+--abbrev=0 main)..main` should be empty once you have tagged.
+
+**Docker tags drop the `v`.** Git tag `v0.3.0` publishes Docker tag `0.3.0`.
+Writing `image.tag: "v0.3.0"` gives you `ErrImagePull`.
+
+**Edit `values-hetzner.yaml`, not `values.yaml`.** The deploy command layers the
+hetzner file on top, so it wins. Bumping only the base does nothing in
+production — and the base says `tag: latest`, which is how a rolling restart
+silently changes which build is serving.
+
+### Before the next release: the registry moves
+
+**This is a one-time step, and the next release is the one that hits it.**
+
+What is running on Hetzner right now is `openfhir/nictiz-ui:1.0.0` — from
+**Docker Hub**, published by the old workflow. Since then, `7d38fce` repointed
+the build at **GHCR** (`ghcr.io/freshehrteam/nictiz-ui`), and the chart already
+pins that registry. So the next tag publishes somewhere nothing has published
+before.
+
+GHCR creates new packages **private**, and an anonymous pull currently returns
+`DENIED`. Until the package is public the cluster cannot pull it — the workflow
+stays green and the pods sit in `ImagePullBackOff`. After the first push to
+GHCR, flip it:
+
+> github.com/orgs/freshehrteam/packages → `nictiz-ui` → Package settings →
+> Danger Zone → Change visibility → Public
+
+Then confirm the tag exists before running step 3:
+
+```bash
+docker manifest inspect ghcr.io/freshehrteam/nictiz-ui:0.3.0 >/dev/null && echo ok
+```
+
+### Where things stand
+
+| | |
+|---|---|
+| Running on Hetzner | `openfhir/nictiz-ui:1.0.0` (Docker Hub), helm revision 11 |
+| Newest git tag | `v1.0.0` — **10 commits behind `main`** |
+| `Chart.yaml` / `values-hetzner.yaml` | `0.1.1` / `0.1.0` — both stale, neither matches what runs |
+| GHCR | nothing pullable yet |
+
+The 10 unreleased commits include the openFHIR 3.0.0 `$tofhir` migration, the
+Bundle viewer, and the duplicate-EHR fix. Cutting the next tag off `main` ships
+all of them **and** moves the registry, so expect to do the visibility flip
+above on that release.
+
+> `v1.0.0` implies a 1.x line while the chart files still say 0.1.x. Pick
+> whichever you actually mean (`v1.0.1` or `v1.1.0` continues it) and put the
+> same number in all three files — the mismatch above is what happens when they
+> drift.
+
+### Notes
+
+- **No Terraform here.** The stack repo deploys its chart via `terraform apply`;
+  this one is installed by hand with `helm upgrade`. Nothing picks up a new tag
+  for you.
+- `ingress.host` (`nictiz-demo.freshehr.com`) and everything else already live in
+  `values-hetzner.yaml`, so step 3 needs no `--set` flags. The registration Job
+  re-runs on every upgrade and repairs the realm's redirect URI in place.
+- `pullPolicy: IfNotPresent` is safe **because tags are immutable** — a new tag
+  is a new pull. It would be a trap with `latest`.
+- After deploying, the [Verify](#verify) checks still apply — `/api/health` is
+  the one that proves this release and the stack release are still wired
+  together.
 
 ---
 
