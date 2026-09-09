@@ -123,7 +123,10 @@ interceptor's server-to-server calls.
 ### One-time setup
 
 **1. Publish the image.** Push a `v*` tag, or run the `build-image` workflow.
-Needs `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` repo secrets.
+Publishing uses the workflow's own `GITHUB_TOKEN` — no repo secrets. One-time,
+after the first push: make the `nictiz-ui` package public
+(github.com/orgs/freshehrteam/packages), or every pull fails despite a green
+workflow.
 
 **2. Point DNS at the load balancer.**
 

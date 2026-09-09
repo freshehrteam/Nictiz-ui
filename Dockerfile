@@ -10,7 +10,7 @@
 #
 # Build context is the REPOSITORY ROOT, not app/ — `fixtures/` lives above app/
 # and is served by /api/golden:
-#   docker build -t openfhir/nictiz-ui:dev .
+#   docker build -t ghcr.io/freshehrteam/nictiz-ui:dev .
 # ============================================================================
 
 # ── Stage 1: build the SPA ───────────────────────────────────────────────────

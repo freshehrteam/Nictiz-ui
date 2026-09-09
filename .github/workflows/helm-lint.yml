@@ -1,108 +1,104 @@
-# DISABLED before repository transfer: this workflow references the previous
-# publisher's registry org and repo secrets and would fail in a new org.
-# Re-enable by uncommenting and updating IMAGE_ORG / secrets / hostnames.
+# Validate the nictiz-ui chart on every change.
 #
-# # Validate the nictiz-ui chart on every change.
-# #
-# # This does NOT publish the chart anywhere, deliberately. The chart is installed
-# # from its path in this repo:
-# #
-# #   helm upgrade --install nictiz-ui charts/nictiz-ui -n health-stack \
-# #     -f charts/nictiz-ui/values-hetzner.yaml
-# #
-# # Pushing a packaged copy to a registry would create a second artifact that
-# # nothing installs from, and that can silently disagree with the working tree —
-# # a registry claiming to hold "0.1.0" while a different 0.1.0 is what actually
-# # runs. If an external consumer ever needs to `helm install oci://...`, add a
-# # release job here AND switch the installer to pull from it, so the published
-# # artifact and the deployed one are the same thing by construction.
-# name: helm-lint
+# This does NOT publish the chart anywhere, deliberately. The chart is installed
+# from its path in this repo:
 #
-# on:
-#   push:
-#     branches: [main]
-#     paths:
-#       - "charts/nictiz-ui/**"
-#       - ".github/workflows/helm-lint.yml"
-#   pull_request:
-#     paths:
-#       - "charts/nictiz-ui/**"
-#       - ".github/workflows/helm-lint.yml"
-#   workflow_dispatch:
+#   helm upgrade --install nictiz-ui charts/nictiz-ui -n health-stack \
+#     -f charts/nictiz-ui/values-hetzner.yaml
 #
-# env:
-#   CHART_DIR: charts/nictiz-ui
-#
-# jobs:
-#   # Render every values file. Catches template regressions that `helm lint`
-#   # alone misses — lint checks the chart, template checks that each environment's
-#   # values actually produce valid manifests.
-#   lint:
-#     runs-on: ubuntu-latest
-#     steps:
-#       - uses: actions/checkout@v4
-#       - uses: azure/setup-helm@v4
-#         with:
-#           version: v3.16.2
-#
-#       - name: Lint
-#         run: |
-#           helm lint ${{ env.CHART_DIR }}
-#           helm lint ${{ env.CHART_DIR }} -f ${{ env.CHART_DIR }}/values-hetzner.yaml
-#
-#       # oidc.issuerUrl has no default on purpose (a wrong guess fails only at
-#       # login time), so the default render must supply one.
-#       - name: Render (default values)
-#         run: |
-#           helm template nictiz-ui ${{ env.CHART_DIR }} -n health-stack \
-#             --set-string oidc.issuerUrl=https://stack.example.com/auth/realms/freshehr > /dev/null
-#
-#       - name: Render (hetzner values)
-#         run: |
-#           helm template nictiz-ui ${{ env.CHART_DIR }} -n health-stack \
-#             -f ${{ env.CHART_DIR }}/values-hetzner.yaml > /dev/null
-#
-#       # The auth wiring is the chart's only real logic. These greps pin the
-#       # invariants a refactor could quietly lose: the forward-auth annotations
-#       # must be present (template-emitted — a values override must not be able
-#       # to drop them), no basic-auth artifact may creep back in (the snippet
-#       # relaxation it needed has been reverted cluster-wide), and the required
-#       # guard on the issuer must still fail a blank value.
-#       - name: Auth guard rails
-#         run: |
-#           RENDERED=$(helm template nictiz-ui ${{ env.CHART_DIR }} -n health-stack \
-#             -f ${{ env.CHART_DIR }}/values-hetzner.yaml)
-#
-#           for must in "nginx.ingress.kubernetes.io/auth-url" \
-#                       "nginx.ingress.kubernetes.io/auth-response-headers" \
-#                       "OAUTH2_PROXY_SET_XAUTHREQUEST" \
-#                       "register-clients"; do
-#             if ! grep -q "$must" <<< "$RENDERED"; then
-#               echo "::error::hetzner render is missing $must"; exit 1
-#             fi
-#           done
-#
-#           for banned in "auth-type: basic" "configuration-snippet"; do
-#             if grep -q "$banned" <<< "$RENDERED"; then
-#               echo "::error::hetzner render still contains '$banned' — basic auth is retired"; exit 1
-#             fi
-#           done
-#
-#           # Both Ingress objects (app + /oauth2) must publish the same host.
-#           HOSTS=$(grep -c 'host: "nictiz-demo.freshehr.com"' <<< "$RENDERED")
-#           INGRESSES=$(grep -c '^kind: Ingress' <<< "$RENDERED")
-#           if [ "$INGRESSES" != "2" ]; then
-#             echo "::error::expected 2 Ingress objects (app + /oauth2), got $INGRESSES"; exit 1
-#           fi
-#           if [ "$HOSTS" -lt 2 ]; then
-#             echo "::error::both Ingresses must publish nictiz-demo.freshehr.com (found $HOSTS rule hosts)"; exit 1
-#           fi
-#
-#           # A blank issuer must fail the render, not ship a proxy that breaks
-#           # only at login time.
-#           if helm template t ${{ env.CHART_DIR }} \
-#                --set-string oidc.issuerUrl="" >/dev/null 2>&1; then
-#             echo "::error::blank oidc.issuerUrl should have failed the render"; exit 1
-#           fi
-#
-#           echo "All auth guard rails hold."
+# Pushing a packaged copy to a registry would create a second artifact that
+# nothing installs from, and that can silently disagree with the working tree —
+# a registry claiming to hold "0.1.0" while a different 0.1.0 is what actually
+# runs. If an external consumer ever needs to `helm install oci://...`, add a
+# release job here AND switch the installer to pull from it, so the published
+# artifact and the deployed one are the same thing by construction.
+name: helm-lint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "charts/nictiz-ui/**"
+      - ".github/workflows/helm-lint.yml"
+  pull_request:
+    paths:
+      - "charts/nictiz-ui/**"
+      - ".github/workflows/helm-lint.yml"
+  workflow_dispatch:
+
+env:
+  CHART_DIR: charts/nictiz-ui
+
+jobs:
+  # Render every values file. Catches template regressions that `helm lint`
+  # alone misses — lint checks the chart, template checks that each environment's
+  # values actually produce valid manifests.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+
+      - name: Lint
+        run: |
+          helm lint ${{ env.CHART_DIR }}
+          helm lint ${{ env.CHART_DIR }} -f ${{ env.CHART_DIR }}/values-hetzner.yaml
+
+      # oidc.issuerUrl has no default on purpose (a wrong guess fails only at
+      # login time), so the default render must supply one.
+      - name: Render (default values)
+        run: |
+          helm template nictiz-ui ${{ env.CHART_DIR }} -n health-stack \
+            --set-string oidc.issuerUrl=https://stack.example.com/auth/realms/freshehr > /dev/null
+
+      - name: Render (hetzner values)
+        run: |
+          helm template nictiz-ui ${{ env.CHART_DIR }} -n health-stack \
+            -f ${{ env.CHART_DIR }}/values-hetzner.yaml > /dev/null
+
+      # The auth wiring is the chart's only real logic. These greps pin the
+      # invariants a refactor could quietly lose: the forward-auth annotations
+      # must be present (template-emitted — a values override must not be able
+      # to drop them), no basic-auth artifact may creep back in (the snippet
+      # relaxation it needed has been reverted cluster-wide), and the required
+      # guard on the issuer must still fail a blank value.
+      - name: Auth guard rails
+        run: |
+          RENDERED=$(helm template nictiz-ui ${{ env.CHART_DIR }} -n health-stack \
+            -f ${{ env.CHART_DIR }}/values-hetzner.yaml)
+
+          for must in "nginx.ingress.kubernetes.io/auth-url" \
+                      "nginx.ingress.kubernetes.io/auth-response-headers" \
+                      "OAUTH2_PROXY_SET_XAUTHREQUEST" \
+                      "register-clients"; do
+            if ! grep -q "$must" <<< "$RENDERED"; then
+              echo "::error::hetzner render is missing $must"; exit 1
+            fi
+          done
+
+          for banned in "auth-type: basic" "configuration-snippet"; do
+            if grep -q "$banned" <<< "$RENDERED"; then
+              echo "::error::hetzner render still contains '$banned' — basic auth is retired"; exit 1
+            fi
+          done
+
+          # Both Ingress objects (app + /oauth2) must publish the same host.
+          HOSTS=$(grep -c 'host: "nictiz-demo.freshehr.com"' <<< "$RENDERED")
+          INGRESSES=$(grep -c '^kind: Ingress' <<< "$RENDERED")
+          if [ "$INGRESSES" != "2" ]; then
+            echo "::error::expected 2 Ingress objects (app + /oauth2), got $INGRESSES"; exit 1
+          fi
+          if [ "$HOSTS" -lt 2 ]; then
+            echo "::error::both Ingresses must publish nictiz-demo.freshehr.com (found $HOSTS rule hosts)"; exit 1
+          fi
+
+          # A blank issuer must fail the render, not ship a proxy that breaks
+          # only at login time.
+          if helm template t ${{ env.CHART_DIR }} \
+               --set-string oidc.issuerUrl="" >/dev/null 2>&1; then
+            echo "::error::blank oidc.issuerUrl should have failed the render"; exit 1
+          fi
+
+          echo "All auth guard rails hold."

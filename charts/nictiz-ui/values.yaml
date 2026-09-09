@@ -19,7 +19,7 @@
 replicaCount: 2
 
 image:
-  repository: openfhir/nictiz-ui
+  repository: ghcr.io/freshehrteam/nictiz-ui
   # Overridden per environment with an immutable tag. `latest` is a dev default;
   # pinning matters because a rolling restart would otherwise silently change
   # which build is serving.

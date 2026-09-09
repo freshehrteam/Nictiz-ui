@@ -5,7 +5,7 @@ type: application
 
 # Chart version. CI overrides this from the git tag on release (v0.1.0 → 0.1.0),
 # the same convention the health-stack chart uses.
-version: 0.1.0
+version: 0.1.1
 
 # The application version tracks app/package.json. `images.nictizUi.tag` is what
 # actually decides which image runs; this is metadata.
