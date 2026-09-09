@@ -56,6 +56,8 @@ spec:
               value: {{ .Values.upstreams.fhirBase | quote }}
             - name: OPENFHIR_BASE
               value: {{ .Values.upstreams.openfhirBase | quote }}
+            - name: HADES_BASE
+              value: {{ .Values.upstreams.hadesBase | quote }}
 
             # BFF→EHRbase: client_credentials against the in-cluster Keycloak.
             # The client id + secret come from this chart's own Secret; the

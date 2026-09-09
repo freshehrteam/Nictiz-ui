@@ -48,6 +48,9 @@ upstreams:
   ehrbaseBase: http://ehrbase:8080/ehrbase/rest/openehr/v1
   fhirBase: http://hapi:8080/fhir
   openfhirBase: http://openfhir:8080
+  # Hades, the stack's FHIR terminology server. Includes the /fhir prefix — its
+  # whole API lives under it, same as fhirBase.
+  hadesBase: http://hades:8080/fhir
 
 # ── BFF→EHRbase credentials (OIDC client_credentials) ────────────────────────
 # EHRbase validates Bearer tokens natively (SECURITY_AUTHTYPE=OAUTH in the
