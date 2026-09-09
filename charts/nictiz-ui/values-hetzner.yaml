@@ -15,7 +15,7 @@
 # `latest` would mean a rolling restart silently changes which build is serving.
 image:
   repository: ghcr.io/freshehrteam/nictiz-ui
-  tag: "0.1.0"
+  tag: "1.0.0"
   pullPolicy: IfNotPresent
 
 replicaCount: 2
