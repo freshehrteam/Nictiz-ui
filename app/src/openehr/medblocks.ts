@@ -13,6 +13,7 @@
 
 import { normalizeExport, ensureRepeatableOccurrences, ROOT } from './flat';
 import { FORM_CTX } from '../forms/context';
+import { ensureDeviceStatus } from '../forms/devices';
 import { nowLocalIso } from '../auth/session';
 
 /**
@@ -150,9 +151,15 @@ export async function importComposition(
  * `export(false)` excludes deferred data: passthrough keys are not the form's
  * to submit, and including them re-posts whatever the last import happened to
  * carry.
+ *
+ * Finally `ensureDeviceStatus()` stamps the fixed `status` = Current onto every
+ * occupied device entry — the form renders no control for it (see
+ * `forms/devices`), yet the CDR demands it 1..1 per entry.
  */
 export function exportComposition(form: MbForm, root: string = ROOT): Record<string, unknown> {
-  return ensureMandatoryContext(normalizeExport(form.export(false) ?? {}, root), root);
+  return ensureDeviceStatus(
+    ensureMandatoryContext(normalizeExport(form.export(false) ?? {}, root), root),
+  );
 }
 
 /**

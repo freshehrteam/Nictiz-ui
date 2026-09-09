@@ -35,6 +35,7 @@ import dotenv from 'dotenv';
 import { callerIdentity, type HeaderBag } from './identity';
 import { createTokenManager } from './oidc';
 import { identifyBundleWithPatient } from './bundle-link';
+import { adoptedEhrStatus, interceptorEhrId } from './ehr-link';
 
 const here = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: resolve(here, '../../.env') });
@@ -662,12 +663,63 @@ function ehrStatusFor(fhirPatientId?: string) {
 }
 
 /**
- * Creates a FHIR Patient and an EHR linked to it, in that order.
+ * Rewrites an existing EHR's EHR_STATUS so `GET /ehr?subject_id=…` resolves it.
  *
- * Order matters: the EHR's subject reference needs the patient id, so the
- * patient must exist first. If EHR creation then fails the patient is left
- * behind — reported rather than rolled back, because a patient with no EHR is
- * recoverable (POST again) while a silent partial success is not.
+ * This is the HTTP half of adopting the interceptor-provisioned EHR (see
+ * ehr-link.ts): read the current status, replace its subject with the
+ * external_ref one, PUT it back under optimistic locking. Failure is returned
+ * as data rather than thrown so the route can name the patient AND the EHR the
+ * caller must reconcile by hand.
+ */
+async function linkEhrToPatient(
+  ehrId: string,
+  patientId: string,
+): Promise<{ ok: true } | { ok: false; detail: string }> {
+  const current = await ehrbase(`ehr/${encodeURIComponent(ehrId)}/ehr_status`);
+  if (!current.ok) {
+    return {
+      ok: false,
+      detail: `EHR_STATUS read failed (HTTP ${current.status}): ${(await current.text()).slice(0, 500)}`,
+    };
+  }
+
+  const adopted = adoptedEhrStatus(await current.json(), ehrStatusFor(patientId).subject as Record<string, unknown>);
+  if (!adopted) {
+    return { ok: false, detail: 'EHR_STATUS carries no uid — cannot PUT under optimistic locking' };
+  }
+
+  const put = await ehrbase(`ehr/${encodeURIComponent(ehrId)}/ehr_status`, {}, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'If-Match': adopted.versionUid },
+    body: JSON.stringify(adopted.body),
+  });
+  if (!put.ok) {
+    return {
+      ok: false,
+      detail: `EHR_STATUS update failed (HTTP ${put.status}): ${(await put.text()).slice(0, 500)}`,
+    };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Creates a FHIR Patient and links exactly ONE EHR to it.
+ *
+ * The stack's HAPI PatientInterceptor already provisions an EHR for every
+ * Patient it stores (precommit hook) and records the id as a Patient
+ * identifier. Creating our own EHR on top of that made TWO per patient, with
+ * UI-written and openFHIR-written compositions landing in different records —
+ * measured live before this handler adopted the interceptor's EHR instead.
+ * Adoption means stamping the external_ref onto its EHR_STATUS so the
+ * subject_id lookup this BFF uses everywhere else resolves it.
+ *
+ * A stack WITHOUT the interceptor leaves no identifier, and the old behaviour
+ * — provision the EHR here — remains as the fallback.
+ *
+ * If linking or creation fails the patient is left behind — reported rather
+ * than rolled back, because a patient with no linked EHR is recoverable while
+ * a silent partial success is not.
  */
 app.post('/api/patients', async (req, res) => {
   try {
@@ -688,6 +740,30 @@ app.post('/api/patients', async (req, res) => {
     const patientId = patient?.id;
     if (!patientId) {
       return res.status(502).json({ error: 'FHIR returned a patient with no id', patient });
+    }
+
+    // The interceptor mutates the Patient before its transaction commits, so
+    // the identifier is normally in the POST response already; one re-read
+    // covers a HAPI that answers with the pre-hook version of the resource.
+    let ehrId = interceptorEhrId(patient);
+    if (!ehrId) {
+      const reread = await fetch(fhirUrl(`Patient/${encodeURIComponent(patientId)}`), {
+        headers: { Accept: 'application/fhir+json' },
+      });
+      if (reread.ok) ehrId = interceptorEhrId(await reread.json());
+    }
+
+    if (ehrId) {
+      const linked = await linkEhrToPatient(ehrId, patientId);
+      if (!linked.ok) {
+        return res.status(502).json({
+          error: 'Patient created but linking its EHR failed',
+          patientId,
+          ehrId,
+          detail: linked.detail,
+        });
+      }
+      return res.status(201).json({ patientId, ehrId, patient });
     }
 
     const ehrRes = await ehrbase('ehr', {}, {

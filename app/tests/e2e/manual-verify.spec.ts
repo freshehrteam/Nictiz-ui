@@ -133,7 +133,9 @@ test('MANUAL 3b + 4: saving "None known" carries the exclusion and NO entry keys
     };
     set(`${root}/eps_allergies/exclusion_-_global/global_exclusion_of_adverse_reactions`, 'No known allergies');
     set(`${root}/eps_history_of_procedures/procedure:0/procedure_name`, 'Appendectomy');
-    set(`${root}/eps_medical_devices/medical_device_summary:0/status`, { code: 'at0004', value: 'Current', terminology: 'local' });
+    // No status control exists — starting the entry with a device name is
+    // enough; exportComposition() stamps status=Current onto occupied entries.
+    set(`${root}/eps_medical_devices/medical_device_summary:0/device_details:0/medical_device/device_name`, 'Ceramic hip implant');
   }, ROOT);
 
   const submitted = await page.evaluate(async (root) => {

@@ -418,16 +418,11 @@ test.describe('composition form', () => {
       await page.keyboard.type(text);
     }
 
-    // `status` is MANDATORY (min=1) on a device summary that carries any data —
-    // EHRbase answers 422 naming the archetype node id at0002, not the field.
-    await page.evaluate((path) => {
-      const el = document.querySelector(`[data-testid="${path}"]`) as any;
-      const select = el?.shadowRoot?.querySelector('sl-select');
-      if (select) {
-        select.value = 'at0004';
-        select.dispatchEvent(new CustomEvent('sl-change', { bubbles: true }));
-      }
-    }, `${DEVICE}/status`);
+    // `status` is MANDATORY (min=1, at0002) on a device summary that carries
+    // any data, but the form renders NO control for it — exportComposition()
+    // stamps the fixed "Current" onto every occupied entry (asserted below),
+    // which is what keeps this save off the 422.
+    await expect(page.locator(`[data-testid="${DEVICE}/status"]`)).toHaveCount(0);
 
     await typeInto(`${DEVICE}/device_details:0/body_site`, 'Left hip');
     await typeInto(`${DEVICE}/device_details:0/medical_device/device_name`, 'Ceramic hip implant');
@@ -472,9 +467,11 @@ test.describe('composition form', () => {
     expect(result.submitted[`${PROCEDURE}/body_site:0|code`]).toBeUndefined();
     expect(result.submitted[`${DEVICE}/device_details:0/body_site|code`]).toBeUndefined();
 
-    // The coded control in the same section DOES emit the triple, so the
-    // absence above is a real distinction, not a form that codes nothing.
+    // The stamped status DOES carry the coded triple — proof both that the
+    // absence above is a real distinction (not a form that codes nothing) and
+    // that the occupied entry got its fixed "Current" without any control.
     expect(result.submitted[`${DEVICE}/status|code`]).toBe('at0004');
+    expect(result.submitted[`${DEVICE}/status|value`]).toBe('Current');
     expect(result.submitted[`${DEVICE}/status|terminology`]).toBe('local');
   });
 

@@ -88,13 +88,6 @@ export const OCCURRENCE: CodeOption[] = [{ code: 'at0096', label: 'Recurrence' }
 
 // --- Medical devices ------------------------------------------------------
 
-/** `medical_device_summary:n/status` — DV_CODED_TEXT, archetype-local. */
-export const DEVICE_STATUS: CodeOption[] = [
-  { code: 'at0003', label: 'Never' },
-  { code: 'at0004', label: 'Current' },
-  { code: 'at0005', label: 'Previous' },
-];
-
 // --- Procedures -----------------------------------------------------------
 
 /**

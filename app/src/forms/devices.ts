@@ -27,13 +27,61 @@ import {
   type SectionRenderContext,
   type AbsencePaths,
 } from './section-shell';
-import { DEVICE_STATUS, DEVICE_ABSENCE_STATEMENT } from '../terminology/codelists';
+import { DEVICE_ABSENCE_STATEMENT } from '../terminology/codelists';
 
 const SECTION = `${ROOT}/eps_medical_devices`;
 
 /** Section root — also used by the view to infer a stored composition's mode. */
 export const DEVICES_SECTION = SECTION;
 export const DEVICES_ENTRIES = `${SECTION}/medical_device_summary`;
+
+/**
+ * The ONLY status this form ever records.
+ *
+ * `status` (at0002) is a mandatory DV_CODED_TEXT whose archetype list is
+ * at0003 Never / at0004 Current / at0005 Previous — but this UI records
+ * devices that are in use, so the choice was removed from the form and every
+ * saved entry is stamped "Current" (at0004, "currently fitted or implanted" —
+ * the openEHR counterpart of FHIR's `active`).
+ *
+ * Stamped at EXPORT, not defaulted on a hidden control, because Medblocks
+ * only serialises elements whose value has been *set* — a default bound via a
+ * property never reaches `export()` (the `composer` lesson), and the CDR
+ * answers with a 422 naming at0002 rather than anything on screen.
+ */
+export const DEVICE_STATUS_CURRENT = {
+  code: 'at0004',
+  value: 'Current',
+  terminology: 'local',
+} as const;
+
+/**
+ * Stamps `status` = Current onto every occupied `medical_device_summary:n`.
+ *
+ * "Occupied" = any exported key under the entry; `export(false)` has already
+ * dropped empty values and seeded `:0` markers, so a prefix appearing here
+ * means the user actually put data in that entry. Unconditional on purpose: a
+ * legacy composition loaded with Never/Previous passes through `deferredData`
+ * (excluded from export) and is re-stamped Current on its next save — the
+ * invariant this exists to hold.
+ */
+export function ensureDeviceStatus(flat: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...flat };
+
+  const entries = new Set<string>();
+  for (const key of Object.keys(out)) {
+    const m = key.match(/^(.*eps_medical_devices\/medical_device_summary:\d+)\//);
+    if (m) entries.add(m[1]);
+  }
+
+  for (const entry of entries) {
+    out[`${entry}/status|code`] = DEVICE_STATUS_CURRENT.code;
+    out[`${entry}/status|value`] = DEVICE_STATUS_CURRENT.value;
+    out[`${entry}/status|terminology`] = DEVICE_STATUS_CURRENT.terminology;
+  }
+
+  return out;
+}
 
 /**
  * The device itself. `unique_device_identifier_udi` and `distinct_identifier`
@@ -165,27 +213,15 @@ function deviceSummary(base: string): TemplateResult {
       <legend>Medical device summary</legend>
 
       <!--
-        DV_CODED_TEXT with an at* list from the template → mb-select.
+        NO BACKTICKS IN THIS COMMENT - one would terminate the template literal.
 
-        MANDATORY (min=1, at0002). If this entry carries any data at all and
-        status is empty, EHRbase rejects the WHOLE composition with
-
-          HTTP 422 …/items[at0002]: Attribute has 0 occurrences, but must be 1..1
-
-        which names an archetype node id rather than a field, so it is not
-        obvious from the message which control the user must fill in.
+        status (at0002, min=1) is deliberately NOT rendered. The form always
+        records it as Current - see DEVICE_STATUS_CURRENT / ensureDeviceStatus,
+        which exportComposition() applies so occupied entries still satisfy the
+        CDR's 1..1 constraint. With no control mounted, validateMandatory()
+        finds no occurrence of the path in the live registry and correctly
+        stays silent about it.
       -->
-      <mb-select
-        .path=${`${base}/status`}
-        label="Status (required)"
-        required
-        data-testid=${`${base}/status`}
-      >
-        ${DEVICE_STATUS.map(
-          (o) => html`<mb-option value=${o.code} label=${o.label} terminology="local"></mb-option>`,
-        )}
-      </mb-select>
-
       <mb-repeatable-simple .path=${`${base}/device_details`}>
         ${deviceDetails(`${base}/device_details:0`)}
       </mb-repeatable-simple>

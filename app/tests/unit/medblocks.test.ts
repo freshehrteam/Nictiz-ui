@@ -249,6 +249,58 @@ describe('exportComposition (D-2, D-3)', () => {
 
     expect(exportComposition(form)[composer]).toBe('Dr Jansen');
   });
+
+  /**
+   * The form renders NO status control — the field is mandatory (min=1,
+   * at0002) per occupied entry, and the product decision is that a recorded
+   * device is always Current. Without this stamp EHRbase answers
+   *
+   *   HTTP 422 …/items[at0002]: Attribute has 0 occurrences, but must be 1..1
+   */
+  it('stamps status=Current onto every occupied device entry', () => {
+    const name = `${ROOT}/eps_medical_devices/medical_device_summary:0/device_details:0/medical_device/device_name`;
+    const other = `${ROOT}/eps_medical_devices/medical_device_summary:1/device_details:0/body_site`;
+    const form = fakeForm([name, other]);
+    form.import({ [name]: 'Ceramic hip implant', [other]: 'Left hip' });
+
+    const out = exportComposition(form);
+    for (const entry of ['medical_device_summary:0', 'medical_device_summary:1']) {
+      const p = `${ROOT}/eps_medical_devices/${entry}/status`;
+      expect(out[`${p}|code`]).toBe('at0004');
+      expect(out[`${p}|value`]).toBe('Current');
+      expect(out[`${p}|terminology`]).toBe('local');
+    }
+  });
+
+  it('does not invent a device entry when the section is empty', () => {
+    const comment = `${ROOT}/eps_allergies/adverse_reaction_risk:0/comment`;
+    const form = fakeForm([comment]);
+    form.import({ [comment]: 'mine' });
+
+    const keys = Object.keys(exportComposition(form));
+    expect(keys.some((k) => k.includes('medical_device_summary'))).toBe(false);
+  });
+
+  /**
+   * A stored composition's status arrives as passthrough (no control binds it
+   * now), is excluded by `export(false)`, and the stamp re-asserts Current —
+   * so a legacy Never/Previous entry converges on the invariant at next save.
+   */
+  it('re-stamps Current over a loaded legacy status', () => {
+    const name = `${ROOT}/eps_medical_devices/medical_device_summary:0/device_details:0/medical_device/device_name`;
+    const status = `${ROOT}/eps_medical_devices/medical_device_summary:0/status`;
+    const form = fakeForm([name]);
+    form.import({
+      [name]: 'Ceramic hip implant',
+      [`${status}|code`]: 'at0003',
+      [`${status}|value`]: 'Never',
+      [`${status}|terminology`]: 'local',
+    });
+
+    const out = exportComposition(form);
+    expect(out[`${status}|code`]).toBe('at0004');
+    expect(out[`${status}|value`]).toBe('Current');
+  });
 });
 
 describe('boundValues', () => {
