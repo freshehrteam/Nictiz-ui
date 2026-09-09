@@ -13,7 +13,8 @@
     "register": "tsx scripts/register-clients.ts",
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "stack:verify": "bash scripts/stack-verify.sh"
   },
   "dependencies": {
     "medblocks-ui": "0.0.217",
