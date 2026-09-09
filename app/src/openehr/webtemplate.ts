@@ -237,12 +237,17 @@ export interface MandatoryField {
   /** RM type of the value child, for message wording and control mapping. */
   valueType?: string;
   /**
-   * The nearest repeatable ancestor's path, if any.
+   * The path of the ancestor whose OCCUPANCY makes this field required, if any.
    *
    * This is what makes the requirement CONDITIONAL. `substance` is mandatory
    * *within an adverse_reaction_risk*, not on the form as a whole — a
    * composition with no allergies at all is perfectly valid. Validation
    * therefore only demands it for occurrences the user actually started.
+   *
+   * Usually the nearest repeatable ancestor — but an optional (min=0) CLUSTER
+   * between that repeatable and the field narrows the scope further:
+   * `used_device/device_name` is min=1, yet a procedure without a used device
+   * is valid, so the demand is scoped to the cluster, not the whole entry.
    */
   repeatableAncestor?: string;
 }
@@ -274,7 +279,12 @@ export function mandatoryFields(template: WebTemplate | undefined): MandatoryFie
 
   const found: MandatoryField[] = [];
 
-  const walk = (node: WebTemplateNode, flatPath: string, repeatableAncestor?: string): void => {
+  const walk = (
+    node: WebTemplateNode,
+    flatPath: string,
+    repeatableAncestor?: string,
+    optionalGate?: string,
+  ): void => {
     for (const child of node.children ?? []) {
       const id = child.id;
       if (!id || NON_FIELD_RM_ATTRIBUTES.has(id)) continue;
@@ -286,6 +296,21 @@ export function mandatoryFields(template: WebTemplate | undefined): MandatoryFie
       const path = structural ? flatPath : `${flatPath}/${id}`;
       const ancestor = child.max === -1 && !structural ? path : repeatableAncestor;
 
+      // An optional (min=0) CLUSTER makes its mandatory descendants conditional
+      // on the CLUSTER being started, not on the surrounding entry:
+      // `used_device/device_name` is min=1, but a procedure without a used
+      // device is valid, and demanding the name on every occupied procedure
+      // makes valid entries unsaveable. ENTRY-level containers are exempt —
+      // mounting one (the section modes) is itself the statement of intent, so
+      // their mandatory children stay demanded while still empty. A repeatable
+      // resets the gate: its own occurrence scoping supersedes it.
+      const gate =
+        child.max === -1 && !structural
+          ? undefined
+          : child.rmType === 'CLUSTER' && (child.min ?? 0) === 0
+            ? path
+            : optionalGate;
+
       if (isLeafField(child)) {
         if ((child.min ?? 0) >= 1) {
           found.push({
@@ -294,14 +319,15 @@ export function mandatoryFields(template: WebTemplate | undefined): MandatoryFie
             valueType: leafValueType(child),
             // A repeatable leaf is scoped by its ANCESTOR, not by itself: its
             // own occurrences are alternatives, any one of which satisfies it.
-            repeatableAncestor: child.max === -1 ? repeatableAncestor : ancestor,
+            repeatableAncestor:
+              child.max === -1 ? repeatableAncestor : (optionalGate ?? ancestor),
           });
         }
         // Trap 1: never descend into a leaf's CHOICE alternatives.
         continue;
       }
 
-      walk(child, path, ancestor);
+      walk(child, path, ancestor, gate);
     }
   };
 

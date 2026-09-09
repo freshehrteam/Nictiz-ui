@@ -149,14 +149,18 @@ test('MANUAL 3b + 4: saving "None known" carries the exclusion and NO entry keys
   // Nor any absence-of-information key, the third branch.
   expect(Object.keys(submitted).filter((k) => k.includes('eps_allergies/absence_of_information'))).toEqual([]);
 
-  // Save it for real. A CLEAN save navigates to the saved record (which then
-  // starts loading it), so the "Saved" status is transient — the durable proof
-  // is that the URL left /new, which only a 0-lost/0-mangled diff does.
+  // Save it for real. A CLEAN save runs the pipeline modal, whose call to
+  // action is the only way onward — it lands on the mapped summary, and the
+  // durable proof is that the URL left /new, which only a clean save does.
   await page.locator('[data-testid=form-save]').click();
+  await page.locator('[data-testid=pipeline-cta]').click();
   await expect(page).toHaveURL(/compositions\/(?!new)[^?]+/, { timeout: 30_000 });
 
-  // ROUND TRIP: reload that record from scratch.
-  const url = page.url();
+  // ROUND TRIP: reload that record — the FORM view, not the summary the CTA
+  // landed on, so strip the /summary segment while keeping the uid.
+  const url = page
+    .url()
+    .replace(/\/summary\?.*$/, `?template=${encodeURIComponent('EPS Patient Summary')}`);
   await page.goto('/#/patients');
   await page.goto(url);
   await formReady(page);
